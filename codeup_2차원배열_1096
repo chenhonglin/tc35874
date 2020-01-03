@@ -1,0 +1,24 @@
+#include <stdio.h>
+#pragma warning(disable : 4996)
+
+int main()
+{
+
+	int i, j,a,k;
+	int x, y;
+	int go[20][20] = {};
+	scanf("%d", &a);
+	for (k = 0; k < a; k++) {
+		scanf("%d %d", &x, &y);
+		go[x][y] = 1;
+	}
+	for (i = 1; i < 20; i++) {
+		for (j = 1; j < 20; j++) {
+			printf("%d ", go[i][j]);
+			
+		}
+		printf("\n");
+	}
+
+	return 0;
+}
