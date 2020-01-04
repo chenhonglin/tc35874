@@ -1,0 +1,29 @@
+#include "pch.h"
+#include <stdio.h>
+
+#pragma warning(disable : 4996)
+
+#define SIZE 10001
+int main()
+{
+	unsigned int num[SIZE];
+	unsigned int x;
+	scanf("%d", &x);
+	int d, k, i, j;
+
+	for (i = 0; i < SIZE; ) {
+		d = x % 2;
+		x = x / 2;
+		num[i] = d;
+		if (x == 0)
+		{
+			break;
+			num[i] = x;
+		}
+		i++;
+	}
+	for (j = i; j >= 0; j--) {
+		printf("%d", num[j]);
+	}
+	return 0;
+}
