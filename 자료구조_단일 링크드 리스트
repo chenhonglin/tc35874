@@ -54,8 +54,8 @@ int main()
 		ptr->Data = x;
 		Insert(ptr);
 	}
-	//ptr = head->Next;
-	while (ptr!=end) {
+	//ptr = head->Next; //이 부분 주석 처리 후
+	while (ptr!=end) { //ptr->Next!=end가 아닌 왼쪽의 상태로 바꿔줬을 때 됐음
 		printf("%2d", ptr->Data);
 		ptr = ptr->Next;
 	}
