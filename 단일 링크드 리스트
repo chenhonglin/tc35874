@@ -1,0 +1,62 @@
+// baek_jun.cpp : 이 파일에는 'main' 함수가 포함됩니다. 거기서 프로그램 실행이 시작되고 종료됩니다.
+//
+
+#include "pch.h"
+#include <stdio.h>
+#include<stdlib.h>
+#include<string.h>
+#pragma warning(disable : 4996)
+
+
+typedef struct _NODE {
+	int Data;
+	struct _NODE *Next;
+}NODE;
+
+NODE *head, *end, *ptr;
+void Init();
+void Insert(NODE*);
+//void Delete(NODE*);
+
+void Init() {
+	head = (NODE*)malloc(sizeof(NODE));
+	end = (NODE*)malloc(sizeof(NODE));
+	
+	
+	head->Next = end;
+	
+	end->Next = end;
+}
+
+void Insert(NODE *pd) {
+	NODE *indexptr;
+
+	for (indexptr = head; indexptr != end; indexptr = indexptr->Next) {
+		if (indexptr->Next->Data > pd->Data)
+			break;
+	}
+	pd->Next = indexptr->Next;
+	indexptr->Next = pd;
+}
+
+int main()
+{
+	//NODE *ptr;
+	int x,i = 0;
+	Init();
+
+	ptr = head->Next;
+	while (1) {
+		printf("0을 제외한 정수 입력: ");
+		scanf("%d", &x);
+		if (x == 0) break;
+		ptr = (NODE*)malloc(sizeof(NODE));
+		ptr->Data = x;
+		Insert(ptr);
+	}
+	//ptr = head->Next;
+	while (ptr!=end) {
+		printf("%2d", ptr->Data);
+		ptr = ptr->Next;
+	}
+}
