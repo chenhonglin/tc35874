@@ -1,0 +1,44 @@
+#include <stdio.h>
+#include <stdlib.h>
+
+#define SIZE 100
+
+int main() {
+	int n, r, i, j;
+	int k[SIZE] = {};
+	
+	int a, b;
+	int least,temp,size;
+	scanf_s("%d %d", &n, &r);
+	
+	for (i = 0; i < n; i++) {
+		scanf_s("%d", &k[i]);
+}
+	
+	for (i = 0; i < n-1; i++) {
+		least = i;
+		for (j = i+1; j < n; j++) 
+			if (k[j] < k[least])
+				least = j;
+
+			temp = k[i];
+			k[i] = k[least];
+			k[least] = temp;
+		
+	}
+	a = 0;
+	b = r;
+	while (1) {
+		for (i = a; i < b; i++) {
+			if (k[i] == 0)
+				break;
+			printf("%d ", k[i]);
+			
+		}
+		if (b >= n) break;
+		printf("\n");
+		a = b;
+		b = r + b;
+		
+	}
+}
