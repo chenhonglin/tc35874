@@ -1,0 +1,28 @@
+#include <stdio.h>
+#include <stdlib.h>
+#pragma warning(disable : 4996)
+
+int main() {
+	int n, i, j;
+	int name[55][22];
+	int score[55], rank[55];
+
+	scanf("%d", &n);
+	for (i = 0; i < n; i++) {
+		scanf("%s", name[i]);
+		scanf("%d", &score[i]);
+		rank[i] = 1;
+	}
+
+	for (i = 0; i < n; i++)
+		for (j = 0; j < n; j++)
+			if (score[i] < score[j])
+				rank[i]++;
+
+	for (i = 0; i < n; i++)
+		if (rank[i] == 3)
+			printf("%s", name[i]);
+	return 0;
+
+
+}
