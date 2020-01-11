@@ -1,0 +1,36 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#pragma warning(disable : 4996)
+
+
+#define SIZE 101
+
+int main() {
+
+	char str1[SIZE],str2[SIZE];
+	int str1_len, str2_len;
+	int rst;
+
+	scanf("%s %s", str1, str2);
+	str1_len = strlen(str1);
+	str2_len = strlen(str2);
+
+	if (str1_len != str2_len) {
+		if (str1_len > str2_len)
+			printf("%s %s", str2, str1);
+		else
+			printf("%s %s", str1, str2);
+	}
+
+	if (str1_len == str2_len) {
+		rst = strcmp(str1, str2);
+		if (rst == -1)
+			printf("%s %s", str1, str2);
+		else if (rst == 1)
+			printf("%s %s", str2, str1);
+	}
+	return 0;
+
+
+}
