@@ -19,7 +19,7 @@ void Test_Pattern() {
 	int i2c_fd;
 	
 	//Open the I2C Bus number 2 or other number
-	if ((i2c_fd = open("dev/i2c-2", O_RDWR)) < 0) {
+	if ((i2c_fd = open("dev/i2c-0", O_RDWR)) < 0) {
 		printf("Failed to open\n");
 		exit(1);
 	}
@@ -33,10 +33,10 @@ void Test_Pattern() {
 		exit(1);
 	}
 
-	char buf[5] = { 0, };
-	buf[0] = TEST_PATT_MODE; //Address for Test Pattern Mode
-	buf[1] = COLOR_BAR16; // For Split Color Bar
-	buf[2] = COLOR_BAR16;
+	char buff[5] = { 0, };
+	buff[0] = TEST_PATT_MODE; //Address for Test Pattern Mode
+	buff[1] = COLOR_BAR16; // For Split Color Bar
+	buff[2] = COLOR_BAR16;
 	int cnt = 0;
 	while (1) {
 		if (write(i2c_fd, buff, 3) != 3) {
