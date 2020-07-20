@@ -2472,12 +2472,16 @@ static struct i2c_device_id tc358743_id[] = {
 	{"tc358743", 0},
 	{}
 };
-
+static const struct of_device_id __maybe_unused tc358743_of_match[] = {
+	{ .compatible = "toshiba,tc358743" },
+	{},
+};
 MODULE_DEVICE_TABLE(i2c, tc358743_id);
 
 static struct i2c_driver tc358743_driver = {
 	.driver = {
 		.name = "tc358743",
+		.of_match_table = of_match_ptr(tc358743_of_match),
 	},
 	.probe = tc358743_probe,
 	.remove = tc358743_remove,
