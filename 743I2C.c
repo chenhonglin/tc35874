@@ -15,25 +15,32 @@
 
 int main(){
 	int fd;
-	unsigned char buf[32];
-	int wr;
+	int err;
+	u8 *data;
+	data[0]=0x0002;
+	data[1]=0x0001;
+	struct i2c_msg i2c_msgs={
+		.addr = 0x0f,
+		.flags = 0,
+		.len = 2,
+		.buf = data,
+	};
+	
 	fd=open("/dev/i2c-6", O_RDWR);
 	
 	if(fd<0){
 		printf("open fail\n");
 		exit(1);
 	}
-
-	ioctl(fd,I2C_SLAVE, 0x0f);
 	
-	buf[0]=0x0002;
-	buf[1]=0x0001;
-
-	wr=write(fd,buf,2);
-	if(wr<0){
-		printf("write fail\n");
-		exit(1);
+	err=ioctl(fd,I2C_RDWR,(struct i2c_rdwr_ioctl_data *) msgs);
+	
+	if(err<0){
+		printf("ioctl fail\n");
 	}
+	
+
+	
 
 	return 0;
 }
