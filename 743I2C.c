@@ -8,7 +8,8 @@
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
- 
+#include <errno.h>
+#include <linux/fs.h>
 #include <linux/i2c.h>
 #include <linux/i2c-dev.h>
 
@@ -16,6 +17,7 @@
 int main(){
 	
 	int fd;
+	int i;
 	fd=open("/dev/i2c-6",O_RDWR);
 	
 	if(fd<0){
