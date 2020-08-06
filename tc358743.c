@@ -81,7 +81,7 @@ static const int tc358743_50fps[] = {
 static const struct camera_common_frmfmt tc358743_frmfmt[] = {
 	{{1280,  720}, tc358743_30_60fps, 3, 1, tc358743_MODE_1280X720},
 	{{1280,  720}, tc358743_50fps, 3, 1, tc358743_MODE_1280X720},
-	{{1920, 1080}, tc358743_30_60fps, 3, 1, tc358743_MODE_1920X1080},
+	//{{1920, 1080}, tc358743_30_60fps, 3, 1, tc358743_MODE_1920X1080},
 };
 
 // static const struct camera_common_colorfmt tc358743_color_fmts[] = {
