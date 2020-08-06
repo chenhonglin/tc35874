@@ -61,7 +61,7 @@ MODULE_LICENSE("GPL");
 /* mode */
 enum {
 	tc358743_MODE_1280X720,
-	tc358743_MODE_1920X1080,
+	//tc358743_MODE_1920X1080,
 };
 
 /* frame rate */
