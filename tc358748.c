@@ -1459,8 +1459,8 @@ static int tc358748_link_setup(struct media_entity *entity,
 
 /* -------------------------------------------------------------------------- */
 
-static const struct v4l2_ctrl_ops tc358764_ctrl_ops = {
-	.s_ctrl = tc358764_s_ctrl,
+static const struct v4l2_ctrl_ops tc358748_ctrl_ops = {
+	.s_ctrl = tc358748_s_ctrl,
 };
 
 static const struct v4l2_subdev_core_ops tc358748_core_ops = {
@@ -1785,12 +1785,12 @@ static int tc358748_probe(struct i2c_client *client,
 	v4l2_ctrl_handler_init(&state->hdl, 1);
 
 	v4l2_ctrl_new_std_menu_items(&state->hdl,
-			&tc358764_ctrl_ops, V4L2_CID_TEST_PATTERN,
-			ARRAY_SIZE(tc358764_test_pattern_menu) - 1, 0, 0,
-			tc358764_test_pattern_menu);
+			&tc358748_ctrl_ops, V4L2_CID_TEST_PATTERN,
+			ARRAY_SIZE(tc358748_test_pattern_menu) - 1, 0, 0,
+			tc358748_test_pattern_menu);
 
 	state->link_freq =
-		v4l2_ctrl_new_int_menu(&state->hdl, &tc358764_ctrl_ops,
+		v4l2_ctrl_new_int_menu(&state->hdl, &tc358748_ctrl_ops,
 				       V4L2_CID_LINK_FREQ,
 				       state->link_frequencies_num - 1,
 				       TC358748_DEF_LINK_FREQ,
