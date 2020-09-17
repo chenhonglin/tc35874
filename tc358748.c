@@ -15,47 +15,17 @@
 #define DEBUG
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/clk-provider.h>
 #include <linux/slab.h>
 #include <linux/i2c.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/gpio/consumer.h>
 #include <linux/interrupt.h>
-#include <linux/videodev2.h>
-#include <linux/workqueue.h>
-#include <linux/v4l2-dv-timings.h>
-
-
-#include <media/v4l2-device.h>
-#include <media/v4l2-ctrls.h>
-#include <media/v4l2-event.h>
-#include <media/v4l2-of.h>
-#include <media/camera_common.h>
-#include <media/i2c/tc358743.h>
-
-#include <dt-bindings/gpio/tegra-gpio.h>
-#include <linux/slab.h>
-#include <linux/uaccess.h>
-#include <linux/gpio.h>
-#include <linux/module.h>
-
-#include <linux/seq_file.h>
-#include <linux/of.h>
-#include <linux/of_device.h>
-#include <linux/of_gpio.h>
-
-#include <linux/i2c-dev.h>
-#include <linux/fs.h>
-
-// #include <media/v4l2-chip-ident.h>
-#include <media/tegra-v4l2-camera.h>
-#include <media/camera_common.h>
-#include <media/soc_camera.h>
-
-
-#include <linux/clk-provider.h>
 #include <linux/timer.h>
 #include <linux/property.h>
+#include <media/v4l2-device.h>
+#include <media/v4l2-ctrls.h>
 #include <media/v4l2-fwnode.h>
 
 #include "tc358748_regs.h"
