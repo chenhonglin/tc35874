@@ -21,8 +21,8 @@
 #define CHIPID_REVID_MASK		GENMASK(7, 0)
 
 #define SYSCTL			0x0002
-#define SYSCTL_SLEEP_MASK		BIT(1)
-#define SYSCTL_SRESET_MASK		BIT(0)
+#define SYSCTL_SLEEP_MASK		0x0002
+#define SYSCTL_SRESET_MASK		0x0001
 
 #define CONFCTL                 0x0004
 #define CONFCTL_TRIEN_MASK		BIT(15)
