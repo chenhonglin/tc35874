@@ -1113,7 +1113,7 @@ static int tc358748_g_mbus_config(struct v4l2_subdev *sd,
 	struct tc358748_csi_param *csi_setting =
 		tc358748_g_cur_csi_settings(state);
 
-	cfg->type = V4L2_MBUS_CSI2_DPHY;
+	cfg->type = V4L2_MBUS_CSI2;
 	cfg->flags = csi_setting->is_continuous_clk ?
 			V4L2_MBUS_CSI2_CONTINUOUS_CLOCK :
 			V4L2_MBUS_CSI2_NONCONTINUOUS_CLOCK;
@@ -1570,7 +1570,7 @@ static int tc358748_probe_fw(struct tc358748_state *state)
 {
 	struct device *dev = &state->i2c_client->dev;
 	struct v4l2_fwnode_endpoint endpoint = {
-		.bus_type = V4L2_MBUS_CSI2_DPHY,
+		.bus_type = V4L2_MBUS_CSI2,
 	};
 	struct fwnode_handle *fw_node;
 	unsigned int refclk, pllinclk;
