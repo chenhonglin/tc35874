@@ -1,0 +1,67 @@
+
+
+===============빌드 디렉터리&컴파일러 디렉터리 지정(일종의 변수지정)==========
+echo Build the kernel NOW!
+sleep 1
+
+JETSON_NANO_KERNEL_SOURCE=~/jetsonkernel/Linux_for_Tegra/source/public 
+TOOLCHAIN_PREFIX=~/jetsonkernel/gcc-linaro/bin/aarch64-linux-gnu-
+TEGRA_KERNEL_OUT=$JETSON_NANO_KERNEL_SOURCE/build
+KERNEL_MODULES_OUT=$JETSON_NANO_KERNEL_SOURCE/modules
+JPK_DIR=~/jdk/hwimage/JetPack_4.4_Linux_JETSON_NANO_DEVKIT/Linux_for_Tegra
+
+
+==== 빌드 디렉터리로 이동=====
+cd $JETSON_NANO_KERNEL_SOURCE
+
+
+========클린(기존 컴파일된 오브젝트/결과파일 삭제)=======
+echo "starting \"makefile\"...."
+make -C kernel/kernel-4.9/ ARCH=arm64 O=$TEGRA_KERNEL_OUT clean mrproper
+make -C kernel/kernel-4.9/ clean mrproper
+
+
+========menuconfig 초기화(필요할때만 수행)=========
+Echo OPTIONS….
+make -C kernel/kernel-4.9/ ARCH=arm64 O=$TEGRA_KERNEL_OUT tegra_defconfig
+
+=======menuconfig진입(필요할때만 수행)==========
+make -C kernel/kernel-4.9/ ARCH=arm64 O=$TEGRA_KERNEL_OUT menuconfig
+
+
+=======Zimage(커널 이미지) 컴파일=======
+make -C kernel/kernel-4.9/ ARCH=arm64 O=$TEGRA_KERNEL_OUT LOCALVERSION=-tegra CROSS_COMPILE=${TOOLCHAIN_PREFIX} -j4 --output-sync=target zImage
+
+========= 모듈들 컴파일========
+make -C kernel/kernel-4.9/ ARCH=arm64 O=$TEGRA_KERNEL_OUT LOCALVERSION=-tegra CROSS_COMPILE=${TOOLCHAIN_PREFIX} -j4 --output-sync=target modules
+
+========= 디바이스트리 컴파일========
+make -C kernel/kernel-4.9/ ARCH=arm64 O=$TEGRA_KERNEL_OUT LOCALVERSION=-tegra CROSS_COMPILE=${TOOLCHAIN_PREFIX} -j4 --output-sync=target dtbs
+
+========= 모듈 인스톨(컴파일한 모듈들 디렉터리 이동)=======
+make -C kernel/kernel-4.9/ ARCH=arm64 O=$TEGRA_KERNEL_OUT LOCALVERSION=-tegra INSTALL_MOD_PATH=$KERNEL_MODULES_OUT modules_install
+echo makefile end
+
+
+======= 2차 디렉터리(Jetson보드에 업로드하기 위한 업로더가 포함되어 있는 디렉터리) 지정=======
+echo starting cp files...
+JETSON_NANO_KERNEL_SOURCE=~/jetsonkernel/Linux_for_Tegra/source/public
+JPK_DIR=~/jdk/hwimage/JetPack_4.4_Linux_JETSON_NANO_DEVKIT/Linux_for_Tegra
+
+=======2차 디렉터리로 컴파일한 파일 이동(순서대로 커널 이미지, 디바이스트리, 모듈)======
+cp $JETSON_NANO_KERNEL_SOURCE/build/arch/arm64/boot/Image $JPK_DIR/kernel/Image
+cp $JETSON_NANO_KERNEL_SOURCE/build/arch/arm64/boot/dts/tegra210-p3448-0000-p3449-0000-a02.dtb $JPK_DIR/kernel/dtb/tegra210-p3448-0000-p3449-0000-a02.dtb
+sudo cp -r  $JETSON_NANO_KERNEL_SOURCE/modules/lib/. $JPK_DIR/rootfs/lib/.
+
+======2차 디렉터리로 이동=====
+echo uploading board....
+cd $JPK_DIR
+
+
+===== UPLOAD=====
+// 업로드시 Jetson 전원 끈 다음에 강제 복구 점퍼 쇼트시키면서 부팅하면 프로그램 업로드 모드로 전환됩니다. 이 상태로 컴퓨터에 Jetson보드를 꼽고 아래 명령어를 넣으시면 업로드됩니다.
+(전체 업로드)
+sudo ./flash.sh jetson-nano-qspi-sd mmcblk0p1
+
+(DTB 디바이스트리만 업로드)
+sudo ./flash.sh -r -k DTB jetson-nano-qspi-sd mmcblk0p1
