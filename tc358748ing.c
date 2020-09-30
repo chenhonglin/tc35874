@@ -1493,7 +1493,7 @@ static const struct media_entity_operations tc358748_entity_ops = {
 /* --------------- PROBE / REMOVE --------------- */
 
 static int tc358748_set_lane_settings(struct tc358748_state *state,
-				      struct v4l2_fwnode_endpoint *fw)
+				      struct v4l2_of_endpoint *endpoint)
 {
 	struct device *dev = &state->i2c_client->dev;
 	int i;
@@ -1510,7 +1510,7 @@ static int tc358748_set_lane_settings(struct tc358748_state *state,
 		 * bps_pr_lane = 2 * link_freq, because MIPI data lane is double
 		 * data rate.
 		 */
-		bps_pr_lane = 2 * fw->link_frequencies[i];
+		bps_pr_lane = 2 * endpoint->link_frequencies[i];
 		if (bps_pr_lane < 62500000U || bps_pr_lane > 1000000000U) {
 			dev_err(dev, "unsupported bps per lane: %u bps\n",
 				bps_pr_lane);
@@ -1529,8 +1529,8 @@ static int tc358748_set_lane_settings(struct tc358748_state *state,
 		s->unit_clk_hz = state->pllinclk_hz >> s->speed_range;
 		s->unit_clk_mul = bps_pr_lane / s->unit_clk_hz;
 		s->speed_per_lane = bps_pr_lane;
-		s->lane_num = fw->bus.mipi_csi2.num_data_lanes;
-		s->is_continuous_clk = fw->bus.mipi_csi2.flags &
+		s->lane_num = endpoint->bus.mipi_csi2.num_data_lanes;
+		s->is_continuous_clk = endpoint->bus.mipi_csi2.flags &
 			V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
 
 		if (s->speed_per_lane != 432000000U)
@@ -1543,7 +1543,7 @@ static int tc358748_set_lane_settings(struct tc358748_state *state,
 			s->speed_per_lane, s->lane_num);
 	}
 
-	state->link_frequencies_num = fw->nr_of_link_frequencies;
+	state->link_frequencies_num = endpoint->nr_of_link_frequencies;
 
 	return 0;
 }
@@ -1613,47 +1613,80 @@ static int tc358748_apply_fw(struct tc358748_state *state)
 
 static int tc358748_probe_of(struct tc358748_state *state)
 {
-	struct device *dev = &state->i2c_client->dev;
-	struct v4l2_of_endpoint endpoint = {
-		bus.mipi_csi2,
-	};
+	truct device *dev = &state->i2c_client->dev;
+	struct v4l2_of_endpoint *endpoint;
 	struct device_node *ep;
-	unsigned int refclk, pllinclk;
-	unsigned char pll_prediv;
+	// struct clk *refclk;
+	u32 bps_pr_lane;
 	int ret = -EINVAL;
 
-	/* Parse all clocks */
-	state->refclk = devm_clk_get(dev, "refclk");
-	if (IS_ERR(state->refclk)) {
-		if (PTR_ERR(state->refclk) != -EPROBE_DEFER)
-			dev_err(dev, "failed to get refclk: %ld\n",
-				PTR_ERR(state->refclk));
-		return PTR_ERR(state->refclk);
-	}
+	// refclk = devm_clk_get(dev, "cam_mclk1");
+	// if (IS_ERR(refclk)) {
+	// 	if (PTR_ERR(refclk) != -EPROBE_DEFER)
+	// 		dev_err(dev, "failed to get refclk: %ld\n",
+	// 			PTR_ERR(refclk));
+	// 	return PTR_ERR(refclk);
+	// }
 
-	refclk = clk_get_rate(state->refclk);
-	if (refclk < 6000000 || refclk > 40000000) {
-		dev_err(dev, "refclk must between 6MHz and 40MHz\n");
+	ep = of_graph_get_next_endpoint(dev->of_node, NULL);
+	if (!ep) {
+		dev_err(dev, "missing endpoint node\n");
 		return -EINVAL;
 	}
+
+	endpoint = v4l2_of_alloc_parse_endpoint(ep);
+	if (IS_ERR(endpoint)) {
+		dev_err(dev, "failed to parse endpoint\n");
+		return PTR_ERR(endpoint);
+	}
+
+	if (endpoint->bus_type != V4L2_MBUS_CSI2 ||
+	    endpoint->bus.mipi_csi2.num_data_lanes == 0 ||
+	    endpoint->nr_of_link_frequencies == 0) {
+		dev_err(dev, "missing CSI-2 properties in endpoint\n");
+		goto free_endpoint;
+	}
+
+	pr_info("tc358743 endpoint->bus.mipi_csi2.flags %d\n",
+		endpoint->bus.mipi_csi2.flags);
+	pr_info("tc358743 endpoint->bus.mipi_csi2.clock_lane %d\n",
+		endpoint->bus.mipi_csi2.clock_lane);
+	pr_info("tc358743 endpoint->bus.mipi_csi2.num_data_lanes %d\n",
+		endpoint->bus.mipi_csi2.num_data_lanes);
+	pr_info("tc358743 endpoint->bus.mipi_csi2.data_lanes [%d-%d-%d-%d]\n",
+			endpoint->bus.mipi_csi2.data_lanes[0],
+			endpoint->bus.mipi_csi2.data_lanes[1],
+			endpoint->bus.mipi_csi2.data_lanes[2],
+			endpoint->bus.mipi_csi2.data_lanes[3]);
+    pr_info("tc358743 endpoint->nr_of_link_frequencies %d\n",
+    	endpoint->nr_of_link_frequencies);
+
+	// state->bus = endpoint->bus.mipi_csi2;
+    // pr_info("tc358743 state->bus %s\n",state->bus);
+	// clk_prepare_enable(refclk);
+
+	// state->pdata.refclk_hz = clk_get_rate(refclk);
+	state->pdata.refclk_hz = 27000000;
+
 
 	/*
 	 * The PLL input clock is obtained by dividing refclk by pll_prd.
 	 * It must be between 4 MHz and 40 MHz, lower frequency is better.
 	 */
-	pll_prediv = DIV_ROUND_CLOSEST(refclk, 4000000);
-	if (pll_prediv < 1 || pll_prediv > 16) {
-		dev_err(dev, "invalid pll pre-divider value: %d\n", pll_prediv);
-		return -EINVAL;
+	switch (state->pdata.refclk_hz) {
+    //~ case 26322581:
+        //~ state->pdata.refclk_hz = 26322581;
+	case 26000000:
+	case 27000000:
+	//~ case 40800000: /* Tegra */
+	case 42000000:
+		state->pdata.pll_prd = state->pdata.refclk_hz / 6000000;
+		break;
+	default:
+		dev_err(dev, "Unsupported refclk rate: %u Hz\n",
+			state->pdata.refclk_hz);
+		goto disable_clk;
 	}
-	state->pll_prd = pll_prediv;
-
-	pllinclk = DIV_ROUND_CLOSEST(refclk, pll_prediv);
-	if (pllinclk < 4000000 || pllinclk > 40000000) {
-		dev_err(dev, "invalid pll input clock: %d Hz\n", pllinclk);
-		return -EINVAL;
-	}
-	state->pllinclk_hz = pllinclk;
 
 	/* Now parse the fw-node */
 	ep = of_graph_get_next_endpoint(dev->of_node, NULL);
