@@ -51,7 +51,7 @@
 #include <media/tegra-v4l2-camera.h>
 #include <media/camera_common.h>
 #include <media/soc_camera.h>
-
+#include <media/i2c/tc358748.h>
 #include "tc358748_regs.h"
 
 static int debug;
@@ -111,6 +111,7 @@ struct tc358748_csi_param {
 };
 
 struct tc358748_state {
+	struct tc358748_platform_data pdata;
 	struct v4l2_subdev sd;
 	struct i2c_client *i2c_client;
 	struct gpio_desc *reset_gpio;
@@ -1546,7 +1547,27 @@ static int tc358748_set_lane_settings(struct tc358748_state *state,
 
 	return 0;
 }
+static bool tc358748_parse_dt(struct tc358748_platform_data *pdata,
+		struct i2c_client *client)
+{
+	struct device_node *node = client->dev.of_node;
+	const u32 *property;
 
+	v4l_dbg(1, debug, client, "Device Tree Parameters:\n");
+
+	pdata->reset_gpio = of_get_named_gpio(node, "reset-gpios", 0);
+	if (pdata->reset_gpio == 0)
+		return false;
+	v4l_dbg(1, debug, client, "reset_gpio = %d\n", pdata->reset_gpio);
+
+	property = of_get_property(node, "refclk_hz", NULL);
+	if (property == NULL)
+		return false;
+	pdata->refclk_hz = be32_to_cpup(property);
+	v4l_dbg(1, debug, client, "refclk_hz = %d\n", be32_to_cpup(property));
+
+	return true;
+}
 static void tc358748_gpio_reset(struct tc358748_state *state)
 {
 	usleep_range(5000, 10000);
@@ -1705,6 +1726,7 @@ static int tc358748_probe(struct i2c_client *client,
 			  const struct i2c_device_id *id)
 {
 	struct tc358748_state *state;
+	struct tc358748_platform_data *pdata = client->dev.platform_data;
 	struct v4l2_subdev *sd;
 	int err;
 
@@ -1714,13 +1736,18 @@ static int tc358748_probe(struct i2c_client *client,
 	state = devm_kzalloc(&client->dev, sizeof(*state), GFP_KERNEL);
 	if (!state)
 		return -ENOMEM;
-
+	if (client->dev.of_node) {
+        if (!tc358748_parse_dt(&state->pdata, client)) {
+            pr_err("Couldn't parse device tree\n");
+            return -ENODEV;
+        }
+    }
 	state->i2c_client = client;
 
 	/* platform data */
-	if (client->dev.platform_data) {
-		
-		client->dev.platform_data->endpoint.bus.mipi_csi2.flags = V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
+	if (pdata) {
+		state->pdata = *pdata;
+		pdata->endpoint.bus.mipi_csi2.flags = V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
 	} else {
 		err = tc358748_probe_of(state);
 		if (err == -ENODEV)
