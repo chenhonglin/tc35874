@@ -28,7 +28,7 @@
 #ifndef _TC358748_
 #define _TC358748_
 
-enum tc358743_csi_port {
+enum tc358748_csi_port {
 	CSI_TX_NONE = 0,
 	CSI_TX_0,
 	CSI_TX_1,
@@ -53,7 +53,7 @@ struct tc358748_platform_data {
 
 
 	/* CSI Output */
-	enum tc358743_csi_port csi_port;  // TODO: Should this be port-index?
+	enum tc358748_csi_port csi_port;  // TODO: Should this be port-index?
 
 	/*
 	 * The FIFO size is 512x32, so Toshiba recommend to set the default FIFO
