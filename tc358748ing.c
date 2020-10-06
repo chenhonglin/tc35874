@@ -1,7 +1,7 @@
 /*		
 * References (c = chapter, p = page):		
 * REF_01 - Toshiba, tc358748XBG (H2C), Functional Specification, Rev 0.60
-* REF_02 - Toshiba, tc358748XBG_Parallel-CSI_Tv11p_nm.xls
+* REF_02 - Toshiba, tc358748XBG_HDMI-CSI_Tv11p_nm.xls
 */
 #define DEBUG
 #include <linux/kernel.h>
@@ -541,28 +541,6 @@ static void tc358748_set_hdmi_hdcp(struct v4l2_subdev *sd, bool enable)
 			enable ? 0 : MASK_REPEATER | MASK_READY);
 }
 
-static void tc358748_disable_edid(struct v4l2_subdev *sd)
-{
-	struct tc358748_state *state = to_state(sd);
-
-	v4l2_info(sd, "%s:\n", __func__);
-
-	cancel_delayed_work_sync(&state->delayed_work_enable_hotplug);
-
-	/* DDC access to EDID is also disabled when hotplug is disabled. See
-	 * register DDC_CTL */
-	i2c_wr8_and_or(sd, HPD_CTL, ~MASK_HPD_OUT0,0x0);
-}
-
-
-
-static void tc358748_erase_bksv(struct v4l2_subdev *sd)
-{
-	int i;
-
-	for (i = 0; i < 5; i++)
-		i2c_wr8(sd, BKSV + i, 0);
-}
 
 /* --------------- AVI infoframe --------------- */
 
@@ -613,16 +591,7 @@ static int tc358748_s_ctrl_audio_present(struct v4l2_subdev *sd)
 	return v4l2_ctrl_s_ctrl(state->audio_present_ctrl, audio_present(sd));
 }
 
-static int tc358748_update_controls(struct v4l2_subdev *sd)
-{
-	int ret = 0;
 
-	ret |= tc358748_s_ctrl_detect_tx_5v(sd);
-	ret |= tc358748_s_ctrl_audio_sampling_rate(sd);
-	ret |= tc358748_s_ctrl_audio_present(sd);
-
-	return ret;
-}
 static unsigned tc358748_num_csi_lanes_needed(struct v4l2_subdev *sd)
 {
 	struct tc358748_state *state = to_state(sd);
@@ -987,78 +956,7 @@ static void tc358748_set_csi(struct v4l2_subdev *sd)
 			MASK_ADDRESS_CSI_INT_ENA | MASK_INTER);
 }
 
-static void tc358748_set_hdmi_phy(struct v4l2_subdev *sd)
-{
-	struct tc358748_state *state = to_state(sd);
-	struct tc358748_platform_data *pdata = &state->pdata;
 
-	/* Default settings from REF_02, sheet "Source HDMI"
-	 * and custom settings as platform data */
-	// turn of physics
-	i2c_wr8_and_or(sd, PHY_EN, ~MASK_ENABLE_PHY,0x0);
-	i2c_wr8(sd, PHY_CTL1, SET_PHY_AUTO_RST1_US(1600) |
-			SET_FREQ_RANGE_MODE_CYCLES(1));
-	i2c_wr8_and_or(sd, PHY_CTL2, ~MASK_PHY_AUTO_RSTn,
-			(pdata->hdmi_phy_auto_reset_tmds_detected ?
-			 MASK_PHY_AUTO_RST2 : 0) |
-			(pdata->hdmi_phy_auto_reset_tmds_in_range ?
-			 MASK_PHY_AUTO_RST3 : 0) |
-			(pdata->hdmi_phy_auto_reset_tmds_valid ?
-			 MASK_PHY_AUTO_RST4 : 0));
-	i2c_wr8(sd, PHY_BIAS,0x40);
-	i2c_wr8(sd, PHY_CSQ, SET_CSQ_CNT_LEVEL(0x0a));
-	i2c_wr8(sd, AVM_CTL, 45);
-	i2c_wr8_and_or(sd, HDMI_DET, ~MASK_HDMI_DET_V,
-			pdata->hdmi_detection_delay << 4);
-
-	i2c_wr8_and_or(sd, HV_RST, ~(MASK_H_PI_RST | MASK_V_PI_RST),
-			(pdata->hdmi_phy_auto_reset_hsync_out_of_range ?
-			 MASK_H_PI_RST : 0) |
-			(pdata->hdmi_phy_auto_reset_vsync_out_of_range ?
-			 MASK_V_PI_RST : 0));
-	// turn on physics
-	i2c_wr8_and_or(sd, PHY_EN, ~MASK_ENABLE_PHY, MASK_ENABLE_PHY);
-}
-
-static void tc358748_set_hdmi_audio(struct v4l2_subdev *sd)
-{
-	struct tc358748_state *state = to_state(sd);
-
-	/* Default settings from REF_02, sheet "Source HDMI" */
-	i2c_wr8(sd, FORCE_MUTE,0x00);
-	i2c_wr8(sd, AUTO_CMD0, MASK_AUTO_MUTE7 | MASK_AUTO_MUTE6 |
-			MASK_AUTO_MUTE5 | MASK_AUTO_MUTE4 |
-			MASK_AUTO_MUTE1 | MASK_AUTO_MUTE0);
-	i2c_wr8(sd, AUTO_CMD1, MASK_AUTO_MUTE9);
-	i2c_wr8(sd, AUTO_CMD2, MASK_AUTO_PLAY3 | MASK_AUTO_PLAY2);
-	i2c_wr8(sd, BUFINIT_START, SET_BUFINIT_START_MS(500));
-	i2c_wr8(sd, FS_MUTE,0x00);
-	i2c_wr8(sd, FS_IMODE, MASK_NLPCM_SMODE | MASK_FS_SMODE);
-	i2c_wr8(sd, ACR_MODE, MASK_CTS_MODE);
-	i2c_wr8(sd, ACR_MDF0, MASK_ACR_L2MDF_1976_PPM | MASK_ACR_L1MDF_976_PPM);
-	i2c_wr8(sd, ACR_MDF1, MASK_ACR_L3MDF_3906_PPM);
-	i2c_wr8(sd, SDO_MODE1, MASK_SDO_FMT_I2S);
-	i2c_wr8(sd, DIV_MODE, SET_DIV_DLY_MS(100));
-
-	mutex_lock(&state->confctl_mutex);
-	i2c_wr16_and_or(sd, CONFCTL,0xffff, MASK_AUDCHNUM_2 |
-			MASK_AUDOUTSEL_I2S | MASK_AUTOINDEX);
-	mutex_unlock(&state->confctl_mutex);
-}
-
-static void tc358748_set_hdmi_info_frame_mode(struct v4l2_subdev *sd)
-{
-	/* Default settings from REF_02, sheet "Source HDMI" */
-	i2c_wr8(sd, PK_INT_MODE, MASK_ISRC2_INT_MODE | MASK_ISRC_INT_MODE |
-			MASK_ACP_INT_MODE | MASK_VS_INT_MODE |
-			MASK_SPD_INT_MODE | MASK_MS_INT_MODE |
-			MASK_AUD_INT_MODE | MASK_AVI_INT_MODE);
-	i2c_wr8(sd, NO_PKT_LIMIT,0x2c);
-	i2c_wr8(sd, NO_PKT_CLR,0x53);
-	i2c_wr8(sd, ERR_PK_LIMIT,0x01);
-	i2c_wr8(sd, NO_PKT_LIMIT2,0x30);
-	i2c_wr8(sd, NO_GDB_LIMIT,0x10);
-}
 
 static void tc358748_initial_setup(struct v4l2_subdev *sd)
 {
@@ -1081,10 +979,7 @@ static void tc358748_initial_setup(struct v4l2_subdev *sd)
 
 	i2c_wr8_and_or(sd, EDID_MODE, ~MASK_EDID_MODE, MASK_EDID_MODE_E_DDC);
 
-	tc358748_set_hdmi_phy(sd);
-	tc358748_set_hdmi_hdcp(sd, pdata->enable_hdcp);
-	tc358748_set_hdmi_audio(sd);
-	tc358748_set_hdmi_info_frame_mode(sd);
+	
 
 	/* All CE and IT formats are detected as RGB full range in DVI mode */
 	i2c_wr8_and_or(sd, VI_MODE, ~MASK_RGB_DVI, 0);
@@ -1123,237 +1018,13 @@ static void tc358748_format_change(struct v4l2_subdev *sd)
 		v4l2_subdev_notify_event(sd, &tc358748_ev_fmt);
 }
 
-static void tc358748_init_interrupts(struct v4l2_subdev *sd)
-{
-	u16 i;
 
-	/* clear interrupt status registers */
-	for (i = SYS_INT; i <= KEY_INT; i++)
-		i2c_wr8(sd, i,0xff);
-
-	i2c_wr16(sd, INTSTATUS,0xffff);
-}
-
-static void tc358748_enable_interrupts(struct v4l2_subdev *sd, bool cable_connected)
-{
-	v4l2_info(sd, "%s: cable connected = %d\n", __func__, cable_connected);
-
-	if (cable_connected) {
-		i2c_wr8(sd, SYS_INTM, ~(MASK_M_DDC | MASK_M_DVI_DET |
-					MASK_M_HDMI_DET) &0xff);
-		i2c_wr8(sd, CLK_INTM, ~MASK_M_IN_DE_CHG);
-		i2c_wr8(sd, CBIT_INTM, ~(MASK_M_CBIT_FS | MASK_M_AF_LOCK |
-					MASK_M_AF_UNLOCK) &0xff);
-		i2c_wr8(sd, AUDIO_INTM, ~MASK_M_BUFINIT_END);
-		i2c_wr8(sd, MISC_INTM, ~MASK_M_SYNC_CHG);
-	} else {
-		i2c_wr8(sd, SYS_INTM, ~MASK_M_DDC &0xff);
-		i2c_wr8(sd, CLK_INTM,0xff);
-		i2c_wr8(sd, CBIT_INTM,0xff);
-		i2c_wr8(sd, AUDIO_INTM,0xff);
-		i2c_wr8(sd, MISC_INTM,0xff);
-	}
-}
-
-static void tc358748_hdmi_audio_int_handler(struct v4l2_subdev *sd,	bool *handled)
-{
-	u8 audio_int_mask = i2c_rd8(sd, AUDIO_INTM);
-	u8 audio_int = i2c_rd8(sd, AUDIO_INT) & ~audio_int_mask;
-
-	i2c_wr8(sd, AUDIO_INT, audio_int);
-
-	v4l2_info(sd, "%s: AUDIO_INT =0x%02x\n", __func__, audio_int);
-
-	tc358748_s_ctrl_audio_sampling_rate(sd);
-	tc358748_s_ctrl_audio_present(sd);
-}
 
 static void tc358748_csi_err_int_handler(struct v4l2_subdev *sd, bool *handled)
 {
 	v4l2_err(sd, "%s: CSI_ERR =0x%x\n", __func__, i2c_rd32(sd, CSI_ERR));
 
 	i2c_wr32(sd, CSI_INT_CLR, MASK_ICRER);
-}
-
-static void tc358748_hdmi_misc_int_handler(struct v4l2_subdev *sd, bool *handled)
-{
-	u8 misc_int_mask = i2c_rd8(sd, MISC_INTM);
-	u8 misc_int = i2c_rd8(sd, MISC_INT) & ~misc_int_mask;
-
-	i2c_wr8(sd, MISC_INT, misc_int);
-
-	v4l2_info(sd, "%s: MISC_INT =0x%02x\n", __func__, misc_int);
-
-	if (misc_int & MASK_I_SYNC_CHG) {
-		/* Reset the HDMI PHY to try to trigger proper lock on the
-		 * incoming video format. Erase BKSV to prevent that old keys
-		 * are used when a new source is connected. */
-		if (no_sync(sd) || no_signal(sd)) {
-			tc358748_reset_phy(sd);
-			tc358748_erase_bksv(sd);
-		}
-
-		tc358748_format_change(sd);
-
-		misc_int &= ~MASK_I_SYNC_CHG;
-		if (handled)
-			*handled = true;
-	}
-
-	if (misc_int) {
-		v4l2_err(sd, "%s: Unhandled MISC_INT interrupts:0x%02x\n",	__func__, misc_int);
-	}
-}
-
-static void tc358748_hdmi_cbit_int_handler(struct v4l2_subdev *sd, bool *handled)
-{
-	u8 cbit_int_mask = i2c_rd8(sd, CBIT_INTM);
-	u8 cbit_int = i2c_rd8(sd, CBIT_INT) & ~cbit_int_mask;
-
-	i2c_wr8(sd, CBIT_INT, cbit_int);
-
-	v4l2_info(sd, "%s: CBIT_INT =0x%02x\n", __func__, cbit_int);
-
-	if (cbit_int & MASK_I_CBIT_FS) {
-
-		v4l2_info(sd, "%s: Audio sample rate changed\n", __func__);
-		tc358748_s_ctrl_audio_sampling_rate(sd);
-
-		cbit_int &= ~MASK_I_CBIT_FS;
-		if (handled)
-			*handled = true;
-	}
-
-	if (cbit_int & (MASK_I_AF_LOCK | MASK_I_AF_UNLOCK)) {
-
-		v4l2_info(sd, "%s: Audio present changed\n", __func__);
-		tc358748_s_ctrl_audio_present(sd);
-
-		cbit_int &= ~(MASK_I_AF_LOCK | MASK_I_AF_UNLOCK);
-		if (handled)
-			*handled = true;
-	}
-
-	if (cbit_int) {
-		v4l2_err(sd, "%s: Unhandled CBIT_INT interrupts:0x%02x\n", __func__, cbit_int);
-	}
-}
-
-static void tc358748_hdmi_clk_int_handler(struct v4l2_subdev *sd, bool *handled)
-{
-	u8 clk_int_mask = i2c_rd8(sd, CLK_INTM);
-	u8 clk_int = i2c_rd8(sd, CLK_INT) & ~clk_int_mask;
-
-	/* Bit 7 and bit 6 are set even when they are masked */
-	i2c_wr8(sd, CLK_INT, clk_int |0x80 | MASK_I_OUT_H_CHG);
-
-	v4l2_info(sd, "%s: CLK_INT =0x%02x\n", __func__, clk_int);
-
-	if (clk_int & (MASK_I_IN_DE_CHG)) {
-
-		v4l2_info(sd, "%s: DE size or position has changed\n",
-				__func__);
-
-		/* If the source switch to a new resolution with the same pixel
-		 * frequency as the existing (e.g. 1080p25 -> 720p50), the
-		 * I_SYNC_CHG interrupt is not always triggered, while the
-		 * I_IN_DE_CHG interrupt seems to work fine. Format change
-		 * notifications are only sent when the signal is stable to
-		 * reduce the number of notifications. */
-		if (!no_signal(sd) && !no_sync(sd))
-			tc358748_format_change(sd);
-
-		clk_int &= ~(MASK_I_IN_DE_CHG);
-		if (handled)
-			*handled = true;
-	}
-
-	if (clk_int) {
-		v4l2_err(sd, "%s: Unhandled CLK_INT interrupts:0x%02x\n", __func__, clk_int);
-	}
-}
-
-static void tc358748_enable_edid(struct v4l2_subdev *sd)
-{
-	struct tc358748_state *state = to_state(sd);
-
-	v4l2_info(sd, "%s\n", __func__);
-	if (state->edid_blocks_written == 0) {
-		v4l2_info(sd, "%s: no EDID -> no hotplug\n", __func__);
-		return;
-	}
-
-	v4l2_info(sd, "%s:\n", __func__);
-
-	/* Enable hotplug after 100 ms. DDC access to EDID is also enabled when
-	 * hotplug is enabled. See register DDC_CTL */
-	queue_delayed_work(state->work_queues,
-			           &state->delayed_work_enable_hotplug, HZ / 10);
-
-	tc358748_enable_interrupts(sd, true);
-	tc358748_s_ctrl_detect_tx_5v(sd);
-	v4l2_info(sd, "%s completed successfully", __FUNCTION__);
-}
-static void tc358748_hdmi_sys_int_handler(struct v4l2_subdev *sd, bool *handled)
-{
-	struct tc358748_state *state = to_state(sd);
-	u8 sys_int_mask = i2c_rd8(sd, SYS_INTM);
-	u8 sys_int = i2c_rd8(sd, SYS_INT) & ~sys_int_mask;
-
-	i2c_wr8(sd, SYS_INT, sys_int);
-
-	v4l2_info(sd, "%s: SYS_INT =0x%02x\n", __func__, sys_int);
-
-	if (sys_int & MASK_I_DDC) {
-		bool tx_5v = tx_5v_power_present(sd);
-
-		v4l2_info(sd, "%s: Tx 5V power present: %s\n",	__func__, tx_5v ?  "yes" : "no");
-
-		if (tx_5v) {
-			tc358748_enable_edid(sd);
-		} else {
-			tc358748_enable_interrupts(sd, false);
-			tc358748_disable_edid(sd);
-			memset(&state->timings, 0, sizeof(state->timings));
-			tc358748_erase_bksv(sd);
-			tc358748_update_controls(sd);
-		}
-
-		sys_int &= ~MASK_I_DDC;
-		if (handled)
-			*handled = true;
-	}
-
-	if (sys_int & MASK_I_DVI) {
-		v4l2_info(sd, "%s: HDMI->DVI change detected\n", __func__);
-
-		/* Reset the HDMI PHY to try to trigger proper lock on the
-		 * incoming video format. Erase BKSV to prevent that old keys
-		 * are used when a new source is connected. */
-		if (no_sync(sd) || no_signal(sd)) {
-			tc358748_reset_phy(sd);
-			tc358748_erase_bksv(sd);
-		}
-
-		sys_int &= ~MASK_I_DVI;
-		if (handled)
-			*handled = true;
-	}
-
-	if (sys_int & MASK_I_HDMI) {
-		v4l2_info(sd, "%s: DVI->HDMI change detected\n", __func__);
-
-		/* Register is reset in DVI mode (REF_01, c. 6.6.41) */
-		i2c_wr8(sd, ANA_CTL, MASK_APPL_PCSX_NORMAL | MASK_ANALOG_ON);
-
-		sys_int &= ~MASK_I_HDMI;
-		if (handled)
-			*handled = true;
-	}
-
-	if (sys_int) {
-		v4l2_err(sd, "%s: Unhandled SYS_INT interrupts:0x%02x\n", __func__, sys_int);
-	}
 }
 
 
@@ -1434,60 +1105,7 @@ static int tc358748_s_register(struct v4l2_subdev *sd,
 }
 #endif
 
-static int tc358748_isr(struct v4l2_subdev *sd, u32 status, bool *handled)
-{
-	u16 intstatus = i2c_rd16(sd, INTSTATUS);
 
-	v4l2_info(sd, "%s: IntStatus =0x%04x\n", __func__, intstatus);
-
-	if (intstatus & MASK_HDMI_INT) {
-		u8 hdmi_int0 = i2c_rd8(sd, HDMI_INT0);
-		u8 hdmi_int1 = i2c_rd8(sd, HDMI_INT1);
-
-		if (hdmi_int0 & MASK_I_MISC)
-			tc358748_hdmi_misc_int_handler(sd, handled);
-		if (hdmi_int1 & MASK_I_CBIT)
-			tc358748_hdmi_cbit_int_handler(sd, handled);
-		if (hdmi_int1 & MASK_I_CLK)
-			tc358748_hdmi_clk_int_handler(sd, handled);
-		if (hdmi_int1 & MASK_I_SYS)
-			tc358748_hdmi_sys_int_handler(sd, handled);
-		if (hdmi_int1 & MASK_I_AUD)
-			tc358748_hdmi_audio_int_handler(sd, handled);
-
-		i2c_wr16(sd, INTSTATUS, MASK_HDMI_INT);
-		intstatus &= ~MASK_HDMI_INT;
-	}
-
-	if (intstatus & MASK_CSI_INT) {
-		u32 csi_int = i2c_rd32(sd, CSI_INT);
-
-		if (csi_int & MASK_INTER)
-			tc358748_csi_err_int_handler(sd, handled);
-
-		i2c_wr16(sd, INTSTATUS, MASK_CSI_INT);
-		intstatus &= ~MASK_CSI_INT;
-	}
-
-	intstatus = i2c_rd16(sd, INTSTATUS);
-	if (intstatus) {
-		v4l2_info(sd,
-				"%s: Unhandled IntStatus interrupts:0x%02x\n",
-				__func__, intstatus);
-	}
-
-	return 0;
-}
-
-static irqreturn_t tc358748_irq_handler(int irq, void *dev_id)
-{
-	struct tc358748_state *state = dev_id;
-	bool handled = false;
-
-	tc358748_isr(&state->sd, 0, &handled);
-
-	return handled ? IRQ_HANDLED : IRQ_NONE;
-}
 
 static int tc358748_subscribe_event(struct v4l2_subdev *sd, 
                                     struct v4l2_fh *fh,
@@ -1788,49 +1406,7 @@ static int tc358748_g_edid(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int tc358748_s_edid(struct v4l2_subdev *sd,
-				           struct v4l2_subdev_edid *edid)
-{
-	struct tc358748_state *state = to_state(sd);
-	u16 edid_len = edid->blocks * EDID_BLOCK_SIZE;
-	
-	v4l2_info(sd, "%s, pad %d, start block %d, blocks %d\n",
-		 __func__, edid->pad, edid->start_block, edid->blocks);
 
-	if (edid->pad != 0)
-		return -EINVAL;
-
-	if (edid->start_block != 0)
-		return -EINVAL;
-
-	if (edid->blocks > EDID_NUM_BLOCKS_MAX) {
-		edid->blocks = EDID_NUM_BLOCKS_MAX;
-		return -E2BIG;
-	}
-
-	tc358748_disable_edid(sd);
-
-	i2c_wr8(sd, EDID_LEN1, edid_len &0xff);
-	i2c_wr8(sd, EDID_LEN2, edid_len >> 8);
-
-	if (edid->blocks == 0) {
-		state->edid_blocks_written = 0;
-		return 0;
-	}
-	i2c_wr(sd, EDID_RAM, edid->edid, edid_len);
-	/* richardyou
-	for (i=0; i<edid_len; i++) {
-		i2c_wr8(sd, EDID_RAM + i, edid->edid[i]);
-	}
-	*/
-	state->edid_blocks_written = edid->blocks;
-
-	// if (tx_5v_power_present(sd))
-		tc358748_enable_edid(sd);
-
-	v4l2_info(sd, "%s completed successfully", __FUNCTION__);
-	return 0;
-}
 // static int tc358748_mbus_fmt(struct v4l2_subdev *sd, struct v4l2_mbus_framefmt *mf)
 // {
 // 	struct tc358748_state *state = to_state(sd);
@@ -1983,7 +1559,7 @@ static const struct v4l2_subdev_core_ops tc358748_core_ops = {
 	.g_register = tc358748_g_register,
 	.s_register = tc358748_s_register,
 #endif
-	.interrupt_service_routine = tc358748_isr,
+	
 	.subscribe_event = tc358748_subscribe_event,
 	.unsubscribe_event = v4l2_event_subdev_unsubscribe,
 };
@@ -2368,10 +1944,6 @@ static int tc358748_probe(struct i2c_client *client,
 		goto err_hdl;
 	}
 
-	if (tc358748_update_controls(sd)) {
-		err = -ENODEV;
-		goto err_hdl;
-	}
 
 	v4l2_info(sd, "Controls updated\n");
 
@@ -2422,24 +1994,10 @@ static int tc358748_probe(struct i2c_client *client,
 	//tc358748_log_status(sd);
 	tc358748_s_dv_timings(sd, &default_timing);
 
-	v4l2_info(sd,"before tc358748_init_interrupts, irq: %d\r\n", state->i2c_client->irq);
-	//tc358748_log_status(sd);
-	tc358748_init_interrupts(sd);
-	v4l2_info(sd,"after tc358748_init_interrupts, irq: %d\r\n", state->i2c_client->irq);
-	if (state->i2c_client->irq) {
-		v4l2_info(sd,"IQR request\r\n");
-		err = devm_request_threaded_irq(&client->dev,
-						state->i2c_client->irq,
-						NULL, tc358748_irq_handler,
-						IRQF_TRIGGER_HIGH | IRQF_ONESHOT,
-						"tc358748", state);
-		v4l2_err(sd,"err, %d\n", err);
-		if (err)
-			goto err_work_queues;
-	}
+	
+	
 
-	tc358748_enable_interrupts(sd, true);
-	i2c_wr16(sd, INTMASK, ~(MASK_HDMI_MSK | MASK_CSI_MSK) &0xffff);
+	
 
 	err = v4l2_ctrl_handler_setup(sd->ctrl_handler);
 
