@@ -388,44 +388,6 @@ static void i2c_wr32(struct v4l2_subdev *sd, u16 reg, u32 val)
 }
 /* --------------- STATUS --------------- */
 
-static inline bool is_hdmi(struct v4l2_subdev *sd)
-{
-	return i2c_rd8(sd, SYS_STATUS) & MASK_S_HDMI;
-}
-
-static inline bool tx_5v_power_present(struct v4l2_subdev *sd)
-{
-	return i2c_rd8(sd, SYS_STATUS) & MASK_S_DDC5V;
-}
-
-static inline bool no_signal(struct v4l2_subdev *sd)
-{
-	return !(i2c_rd8(sd, SYS_STATUS) & MASK_S_TMDS);
-}
-
-static inline bool no_sync(struct v4l2_subdev *sd)
-{
-	return !(i2c_rd8(sd, SYS_STATUS) & MASK_S_SYNC);
-}
-
-static inline bool audio_present(struct v4l2_subdev *sd)
-{
-	return i2c_rd8(sd, AU_STATUS0) & MASK_S_A_SAMPLE;
-}
-
-static int get_audio_sampling_rate(struct v4l2_subdev *sd)
-{
-	static const int code_to_rate[] = {
-		44100, 0, 48000, 32000, 22050, 384000, 24000, 352800,
-		88200, 768000, 96000, 705600, 176400, 0, 192000, 0
-	};
-
-	/* Register FS_SET is not cleared when the cable is disconnected */
-	if (no_signal(sd))
-		return 0;
-
-	return code_to_rate[i2c_rd8(sd, FS_SET) & MASK_FS];
-}
 
 static unsigned tc358748_num_csi_lanes_in_use(struct v4l2_subdev *sd)
 {
@@ -513,83 +475,12 @@ static void tc358748_delayed_work_enable_hotplug(struct work_struct *work)
 	*/
 }
 
-static void tc358748_set_hdmi_hdcp(struct v4l2_subdev *sd, bool enable)
-{
-	v4l2_info(sd, "%s: %s\n", __func__, enable ?
-				"enable" : "disable");
-
-	i2c_wr8_and_or(sd, HDCP_REG1,
-			~(MASK_AUTH_UNAUTH_SEL | MASK_AUTH_UNAUTH),
-			MASK_AUTH_UNAUTH_SEL_16_FRAMES | MASK_AUTH_UNAUTH_AUTO);
-
-	i2c_wr8_and_or(sd, HDCP_REG2, ~MASK_AUTO_P3_RESET,
-			SET_AUTO_P3_RESET_FRAMES(0x0f));
-
-	/* HDCP is disabled by configuring the receiver as HDCP repeater. The
-	 * repeater mode require software support to work, so HDCP
-	 * authentication will fail. */
-	i2c_wr8_and_or(sd, HDCP_REG3, ~KEY_RD_CMD, enable ? KEY_RD_CMD : 0);
-	i2c_wr8_and_or(sd, HDCP_MODE, ~(MASK_AUTO_CLR | MASK_MODE_RST_TN),
-			enable ?  (MASK_AUTO_CLR | MASK_MODE_RST_TN) : 0);
-
-	/* Apple MacBook Pro gen.8 has a bug that makes it freeze every fifth
-	 * second when HDCP is disabled, but the MAX_EXCED bit is handled
-	 * correctly and HDCP is disabled on the HDMI output. */
-	i2c_wr8_and_or(sd, BSTATUS1, ~MASK_MAX_EXCED,
-			enable ? 0 : MASK_MAX_EXCED);
-	i2c_wr8_and_or(sd, BCAPS, ~(MASK_REPEATER | MASK_READY),
-			enable ? 0 : MASK_REPEATER | MASK_READY);
-}
 
 
-/* --------------- AVI infoframe --------------- */
 
-static void print_avi_infoframe(struct v4l2_subdev *sd)
-{
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	struct device *dev = &client->dev;
-	union hdmi_infoframe frame;
-	u8 buffer[HDMI_INFOFRAME_SIZE(AVI)];
 
-	if (!is_hdmi(sd)) {
-		v4l2_info(sd, "DVI-D signal - AVI infoframe not supported\n");
-		return;
-	}
 
-	i2c_rd(sd, PK_AVI_0HEAD, buffer, HDMI_INFOFRAME_SIZE(AVI));
 
-	if (hdmi_infoframe_unpack(&frame, buffer) < 0) {
-		v4l2_err(sd, "%s: unpack of AVI infoframe failed\n", __func__);
-		return;
-	}
-
-	hdmi_infoframe_log(KERN_INFO, dev, &frame);
-}
-
-/* --------------- CTRLS --------------- */
-
-static int tc358748_s_ctrl_detect_tx_5v(struct v4l2_subdev *sd)
-{
-	struct tc358748_state *state = to_state(sd);
-
-	return v4l2_ctrl_s_ctrl(state->detect_tx_5v_ctrl,
-			tx_5v_power_present(sd));
-}
-
-static int tc358748_s_ctrl_audio_sampling_rate(struct v4l2_subdev *sd)
-{
-	struct tc358748_state *state = to_state(sd);
-
-	return v4l2_ctrl_s_ctrl(state->audio_sampling_rate_ctrl,
-			get_audio_sampling_rate(sd));
-}
-
-static int tc358748_s_ctrl_audio_present(struct v4l2_subdev *sd)
-{
-	struct tc358748_state *state = to_state(sd);
-
-	return v4l2_ctrl_s_ctrl(state->audio_present_ctrl, audio_present(sd));
-}
 
 
 static unsigned tc358748_num_csi_lanes_needed(struct v4l2_subdev *sd)
@@ -654,71 +545,10 @@ static int tc358748_log_status(struct v4l2_subdev *sd)
 			!!(sysctl & MASK_CTXRST),
 			!!(sysctl & MASK_HDMIRST));
 	v4l2_info(sd, "Sleep mode: %s\n", sysctl & MASK_SLEEP ? "on" : "off");
-	v4l2_info(sd, "Cable detected (+5V power): %s\n",
-			hdmi_sys_status & MASK_S_DDC5V ? "yes" : "no");
-	v4l2_info(sd, "DDC lines enabled: %s\n",
-			(i2c_rd8(sd, EDID_MODE) & MASK_EDID_MODE_E_DDC) ?
-			"yes" : "no");
-	v4l2_info(sd, "Hotplug enabled: %s\n",
-			(i2c_rd8(sd, HPD_CTL) & MASK_HPD_OUT0) ?
-			"yes" : "no");
-	v4l2_info(sd, "CEC enabled: %s\n",
-			(i2c_rd16(sd, CECEN) & MASK_CECEN) ?  "yes" : "no");
-	v4l2_info(sd, "-----Signal status-----\n");
-	v4l2_info(sd, "TMDS signal detected: %s\n",
-			hdmi_sys_status & MASK_S_TMDS ? "yes" : "no");
-	v4l2_info(sd, "Stable sync signal: %s\n",
-			hdmi_sys_status & MASK_S_SYNC ? "yes" : "no");
-	v4l2_info(sd, "PHY PLL locked: %s\n",
-			hdmi_sys_status & MASK_S_PHY_PLL ? "yes" : "no");
-	v4l2_info(sd, "PHY DE detected: %s\n",
-			hdmi_sys_status & MASK_S_PHY_SCDT ? "yes" : "no");
+	
+	
 
-	if (tc358748_get_detected_timings(sd, &timings)) {
-		v4l2_info(sd, "No video detected\n");
-	} else {
-		v4l2_print_dv_timings(sd->name, "Detected format: ", &timings, true);
-	}
-	v4l2_print_dv_timings(sd->name, "Configured format: ", &state->timings, true);
-
-	v4l2_info(sd, "-----CSI-TX status-----\n");
-	v4l2_info(sd, "Lanes needed: %d\n",
-			tc358748_num_csi_lanes_needed(sd));
-	v4l2_info(sd, "Lanes in use: %d\n",
-			tc358748_num_csi_lanes_in_use(sd));
-	v4l2_info(sd, "Waiting for particular sync signal: %s\n",
-			(i2c_rd16(sd, CSI_STATUS) & MASK_S_WSYNC) ?
-			"yes" : "no");
-	v4l2_info(sd, "Transmit mode: %s\n",
-			(i2c_rd16(sd, CSI_STATUS) & MASK_S_TXACT) ?
-			"yes" : "no");
-	v4l2_info(sd, "Receive mode: %s\n",
-			(i2c_rd16(sd, CSI_STATUS) & MASK_S_RXACT) ?
-			"yes" : "no");
-	v4l2_info(sd, "Stopped: %s\n",
-			(i2c_rd16(sd, CSI_STATUS) & MASK_S_HLT) ?
-			"yes" : "no");
-	v4l2_info(sd, "Color space: %s\n",
-			state->mbus_fmt_code == MEDIA_BUS_FMT_UYVY8_1X16 ?
-			"YCbCr 422 16-bit" :
-			state->mbus_fmt_code == MEDIA_BUS_FMT_RGB888_1X24 ?
-			"RGB 888 24-bit" : "Unsupported");
-
-	v4l2_info(sd, "-----%s status-----\n", is_hdmi(sd) ? "HDMI" : "DVI-D");
-	v4l2_info(sd, "HDCP encrypted content: %s\n",
-			hdmi_sys_status & MASK_S_HDCP ? "yes" : "no");
-	v4l2_info(sd, "Input color space: %s %s range\n",
-			input_color_space[(vi_status3 & MASK_S_V_COLOR) >> 1],
-			(vi_status3 & MASK_LIMITED) ? "limited" : "full");
-	if (!is_hdmi(sd))
-		return 0;
-	v4l2_info(sd, "AV Mute: %s\n", hdmi_sys_status & MASK_S_AVMUTE ? "on" :
-			"off");
-	v4l2_info(sd, "Deep color mode: %d-bits per channel\n",
-			deep_color_mode[(i2c_rd8(sd, VI_STATUS1) &
-				MASK_S_DEEPCOLOR) >> 2]);
-	print_avi_infoframe(sd);
-
+	
 	return 0;
 }
 
