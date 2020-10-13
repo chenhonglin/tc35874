@@ -31,7 +31,6 @@
 #include <media/v4l2-event.h>
 #include <media/v4l2-of.h>
 #include <media/camera_common.h>
-#include <media/i2c/tc358748.h>
 
 #include <dt-bindings/gpio/tegra-gpio.h>
 #include <linux/slab.h>
@@ -1634,7 +1633,27 @@ static int tc358748_set_lane_settings(struct tc358748_state *state,
 
 	return 0;
 }
+static bool tc358748_parse_dt(struct tc358748_platform_data *pdata,
+		struct i2c_client *client)
+{
+	struct device_node *node = client->dev.of_node;
+	const u32 *property;
 
+	v4l_dbg(1, debug, client, "Device Tree Parameters:\n");
+
+	pdata->reset_gpio = of_get_named_gpio(node, "reset-gpios", 0);
+	if (pdata->reset_gpio == 0)
+		return false;
+	v4l_dbg(1, debug, client, "reset_gpio = %d\n", pdata->reset_gpio);
+
+	property = of_get_property(node, "refclk_hz", NULL);
+	if (property == NULL)
+		return false;
+	pdata->refclk_hz = be32_to_cpup(property);
+	v4l_dbg(1, debug, client, "refclk_hz = %d\n", be32_to_cpup(property));
+
+	return true;
+}
 static void tc358748_gpio_reset(struct tc358748_state *state)
 {
 	usleep_range(5000, 10000);
@@ -1901,31 +1920,28 @@ static int tc358748_probe(struct i2c_client *client,
 	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE | V4L2_SUBDEV_FL_HAS_EVENTS;
 
 	/* i2c access */
-	chip_id_val = i2c_rd16(sd, CHIPID);
-	v4l2_info(sd,"Chip ID val: %d\n", chip_id_val);
-
-	if ((chip_id_val & MASK_CHIPID) != 0 || chip_id_val == 99) {
-        v4l2_info(sd,"tc358748: ERROR: not a tc358748 on address0x%x\n",
-			  client->addr);
+	/* i2c access */
+	if (((i2c_rd16(sd, CHIPID) & CHIPID_CHIPID_MASK) >> 8) != 0x44) {
+		v4l2_info(sd, "not a TC358748 on address 0x%x\n",
+			  client->addr << 1);
 		return -ENODEV;
 	}
-	
+
 	/* control handlers */
-	v4l2_ctrl_handler_init(&state->hdl, 3);
-	v4l2_info(sd, "ctrl handler initied\n");
+	v4l2_ctrl_handler_init(&state->hdl, 1);
 
-	/* private controls */
-	state->detect_tx_5v_ctrl = v4l2_ctrl_new_std(&state->hdl, NULL,
-			V4L2_CID_DV_RX_POWER_PRESENT, 0, 1, 0, 0);
+	v4l2_ctrl_new_std_menu_items(&state->hdl,
+			&tc358764_ctrl_ops, V4L2_CID_TEST_PATTERN,
+			ARRAY_SIZE(tc358764_test_pattern_menu) - 1, 0, 0,
+			tc358764_test_pattern_menu);
 
-	/* custom controls */
-	state->audio_sampling_rate_ctrl = v4l2_ctrl_new_custom(&state->hdl,
-			&tc358748_ctrl_audio_sampling_rate, NULL);
+	state->link_freq =
+		v4l2_ctrl_new_int_menu(&state->hdl, &tc358764_ctrl_ops,
+				       V4L2_CID_LINK_FREQ,
+				       state->link_frequencies_num - 1,
+				       TC358748_DEF_LINK_FREQ,
+				       state->link_frequencies);
 
-	state->audio_present_ctrl = v4l2_ctrl_new_custom(&state->hdl,
-			&tc358748_ctrl_audio_present, NULL);
-
-	v4l2_info(sd, "A bunch of new cutoms done\n");
 
 	sd->ctrl_handler = &state->hdl;
 	if (state->hdl.error) {
@@ -1933,97 +1949,36 @@ static int tc358748_probe(struct i2c_client *client,
 		goto err_hdl;
 	}
 
-	if (tc358748_update_controls(sd)) {
-		err = -ENODEV;
-		goto err_hdl;
-	}
-
-	v4l2_info(sd, "Controls updated\n");
-
-	/* work queues */
-	state->work_queues = create_singlethread_workqueue(client->name);
-	if (!state->work_queues) {
-		v4l2_err(sd, "Could not create work queue\n");
-		err = -ENOMEM;
-		goto err_hdl;
-	}
-	v4l2_info(sd, "Work queue created\n");
-	// sd->entity.type = MEDIA_ENT_T_V4L2_SUBDEV_SENSOR;
-	sd->entity.ops = &tc358748_media_ops;
-	state->pad.flags = MEDIA_PAD_FL_SOURCE;
-	v4l2_info(sd, "About to call tegra_media_entity_init\n");
-	err = tegra_media_entity_init(&sd->entity, 1, &state->pad, true, true);
-	if (err < 0)
-		goto err_hdl;
-	v4l2_info(sd, "tegra_media_entity_init complete\n");
-
-#ifdef tc358748_VOUT_RGB
-	state->mbus_fmt_code = MEDIA_BUS_FMT_RGB888_1X24;
-#else
-	state->mbus_fmt_code = MEDIA_BUS_FMT_UYVY8_1X16;
-#endif
-
-	v4l2_info(sd, "Set mbus_fmt_code in probe to: %d\n", state->mbus_fmt_code);
-
-	sd->dev = &client->dev;
-	v4l2_info(sd, "About to register subdev\n");
-	err = v4l2_async_register_subdev(sd);
-	v4l_dbg(1, debug, client, "Register subdev: %d\n", err);
-
+	state->pads[1].flags = MEDIA_PAD_FL_SOURCE;
+	state->pads[0].flags = MEDIA_PAD_FL_SINK;
+	sd->entity.function = MEDIA_ENT_F_VID_IF_BRIDGE;
+	sd->entity.ops = &tc358748_entity_ops;
+	err = media_entity_pads_init(&sd->entity, 2, state->pads);
 	if (err < 0)
 		goto err_hdl;
 
 	mutex_init(&state->confctl_mutex);
 
-	INIT_DELAYED_WORK(&state->delayed_work_enable_hotplug,
-			tc358748_delayed_work_enable_hotplug);
-	v4l2_info(sd,"before tc358748_initial_setup\r\n");
-	//tc358748_log_status(sd);
-	tc358748_initial_setup(sd);
-	v4l2_info(sd,"after tc358748_initial_setup\r\n");
-	
+	state->fmt = tc358748_def_fmt;
+
+	/* apply default settings */
+	tc358748_sreset(sd);
+	tc358748_set_buffers(sd);
+	tc358748_set_csi(sd);
 	tc358748_set_csi_color_space(sd);
-	v4l2_info(sd,"before tc358748_s_dv_timings\r\n");
-	//tc358748_log_status(sd);
-	tc358748_s_dv_timings(sd, &default_timing);
+	tc358748_sleep_mode(sd, 1);
+	tc358748_set_pll(sd);
+	tc358748_enable_stream(sd, 0);
 
-	v4l2_info(sd,"before tc358748_init_interrupts, irq: %d\r\n", state->i2c_client->irq);
-	//tc358748_log_status(sd);
-	tc358748_init_interrupts(sd);
-	v4l2_info(sd,"after tc358748_init_interrupts, irq: %d\r\n", state->i2c_client->irq);
-	if (state->i2c_client->irq) {
-		v4l2_info(sd,"IQR request\r\n");
-		err = devm_request_threaded_irq(&client->dev,
-						state->i2c_client->irq,
-						NULL, tc358748_irq_handler,
-						IRQF_TRIGGER_HIGH | IRQF_ONESHOT,
-						"tc358748", state);
-		v4l2_err(sd,"err, %d\n", err);
-		if (err)
-			goto err_work_queues;
-	}
+	err = tc358748_async_register(sd);
+	if (err < 0)
+		goto err_hdl;
 
-	tc358748_enable_interrupts(sd, true);
-	i2c_wr16(sd, INTMASK, ~(MASK_HDMI_MSK | MASK_CSI_MSK) &0xffff);
+	v4l2_info(sd, "%s found @ 0x%x (%s)\n", client->name,
+		  client->addr << 1, client->adapter->name);
 
-	err = v4l2_ctrl_handler_setup(sd->ctrl_handler);
-
-	if (err)
-		goto err_work_queues;
-
-	v4l2_info(sd, "%s found @0x%x (%s)\n", client->name,
-		  client->addr, client->adapter->name);
-	tc358748_s_edid(sd, &sd_edid);
-	tc358748_g_edid(sd, &sd_edid);
-
-	tc358748_log_status(sd);
-	v4l2_info(sd,"Probe complete\n");
 	return 0;
 
-err_work_queues:
-	cancel_delayed_work(&state->delayed_work_enable_hotplug);
-	destroy_workqueue(state->work_queues);
-	mutex_destroy(&state->confctl_mutex);
 err_hdl:
 	media_entity_cleanup(&sd->entity);
 	v4l2_ctrl_handler_free(&state->hdl);
@@ -2035,8 +1990,6 @@ static int tc358748_remove(struct i2c_client *client)
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct tc358748_state *state = to_state(sd);
 
-	cancel_delayed_work(&state->delayed_work_enable_hotplug);
-	destroy_workqueue(state->work_queues);
 	v4l2_async_unregister_subdev(sd);
 	v4l2_device_unregister_subdev(sd);
 	mutex_destroy(&state->confctl_mutex);
