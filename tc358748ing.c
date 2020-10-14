@@ -728,6 +728,7 @@ static void tc358748_set_pll(struct v4l2_subdev *sd)
 	struct tc358748_csi_param *csi_setting =
 		tc358748_g_cur_csi_settings(state);
 	struct device *dev = &state->i2c_client->dev;
+	struct tc358743_platform_data *pdata = &state->pdata;
 	u16 pllctl0 = i2c_rd16(sd, PLLCTL0);
 	u16 pllctl1 = i2c_rd16(sd, PLLCTL1);
 	u16 pll_frs = csi_setting->speed_range;
@@ -740,11 +741,11 @@ static void tc358748_set_pll(struct v4l2_subdev *sd)
 	 * Calculation used by REF_02:
 	 * speed_per_lane = (pllinclk_hz * fbd) / 2^frs
 	 */
-	state->pll_fbd = csi_setting->speed_per_lane / state->pllinclk_hz;
-	state->pll_fbd <<= pll_frs;
+	pdata->pll_fbd = csi_setting->speed_per_lane / pdata->refclk_hz;
+	pdata->pll_fbd <<= pll_frs;
 
-	pllctl0_new = PLLCTL0_PLL_PRD_SET(state->pll_prd) |
-		      PLLCTL0_PLL_FBD_SET(state->pll_fbd);
+	pllctl0_new = PLLCTL0_PLL_PRD_SET(pdata->pll_prd) |
+		      PLLCTL0_PLL_FBD_SET(pdata->pll_prd);
 
 	/*
 	 * Only rewrite when needed (new value or disabled), since rewriting
@@ -1539,10 +1540,10 @@ static int tc358748_probe_of(struct tc358748_state *state)
 	 * The default is 594 Mbps for 4-lane 1080p60 or 2-lane 720p60.
 	 */
 	bps_pr_lane = 2 * endpoint->link_frequencies[0];
-	if (bps_pr_lane < 62500000U || bps_pr_lane > 1000000000U) {
+	/*if (bps_pr_lane < 62500000U || bps_pr_lane > 1000000000U) {
 		dev_err(dev, "unsupported bps per lane: %u bps\n", bps_pr_lane);
 		goto disable_clk;
-	}
+	}*/
 
 	/* The CSI speed per lane is refclk / pll_prd * pll_fbd */
 	state->pdata.pll_fbd = bps_pr_lane /
