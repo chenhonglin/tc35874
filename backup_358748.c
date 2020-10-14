@@ -66,30 +66,6 @@ MODULE_AUTHOR("Mikhail Khelik <mkhelik@cisco.com>");
 MODULE_AUTHOR("Mats Randgaard <matrandg@cisco.com>");
 MODULE_LICENSE("GPL");
 
-/* mode */
-enum {
-	tc358748_MODE_1280X720,
-//	tc358748_MODE_1920X1080,
-};
-
-/* frame rate */
-static const int tc358748_30fps[] = {
-	30,
-};
-static const int tc358748_30_60fps[] = {
-	30,
-	50,
-	60,
-};
-static const int tc358748_50fps[] = {
-	50,
-};
-
-/* frame format */
-static const struct camera_common_frmfmt tc358748_frmfmt[] = {
-	{{1280,  720}, tc358748_30_60fps, 3, 1, tc358748_MODE_1280X720},
-//	{{1920, 1080}, tc358748_30_60fps, 3, 1, tc358748_MODE_1920X1080},
-};
 
 #define I2C_MAX_XFER_SIZE	(512 + 2)
 #define TC358748_MAX_FIFO_SIZE	512
@@ -197,7 +173,7 @@ struct tc358748_platform_data {
 	};
 
 struct tc358748_state {
-	struct tc358743_platform_data pdata;
+	struct tc358748_platform_data pdata;
 	struct v4l2_subdev sd;
 	struct i2c_client *i2c_client;
 	struct gpio_desc *reset_gpio;
@@ -496,197 +472,7 @@ out:
 	return freq;
 }
 
-static int
-tc358748_calculate_csi_txtimings(struct tc358748_state *state,
-				 struct tc358748_csi_param *csi_setting)
-{
-	struct device *dev = &state->i2c_client->dev;
-	unsigned int spl;
-	unsigned int spl_p_ps, hsclk_p_ps, hfclk_p_ns;
-	unsigned int hfclk, hsclk; /* SYSCLK */
-	unsigned int tmp;
-	unsigned int lptxtime_ps, tclk_post_ps, tclk_trail_ps, tclk_zero_ps,
-		     ths_trail_ps, ths_zero_ps;
 
-	spl = csi_setting->speed_per_lane;
-	hsclk = spl >> 3; /* spl in bit-per-second, hsclk in byte-per-sercond */
-	hfclk = hsclk >> 1; /* HFCLK = SYSCLK / 2 */
-
-	if (hsclk > 125000000U) {
-		dev_err(dev, "unsupported HS byte clock %d, must <= 125 MHz\n",
-			hsclk);
-		return -EINVAL;
-	}
-
-	hfclk_p_ns = DIV_ROUND_CLOSEST(1000000000, hfclk);
-	hsclk_p_ps = 1000000000 / (hsclk / 1000);
-	spl_p_ps   = 1000000000 / (spl / 1000);
-
-	/*
-	 * Calculation:
-	 * hfclk_p_ns * lineinitcnt > 100us
-	 * lineinitcnt > 100 * 10^-6s / hfclk_p_ns * 10^-9
-	 *
-	 */
-	csi_setting->lineinitcnt = DIV_ROUND_UP(TC358748_LINEINIT_MIN_US * 1000,
-					  hfclk_p_ns);
-
-	/*
-	 * Calculation:
-	 * (lptxtimecnt + 1) * hsclk_p_ps > 50ns
-	 * 38ns < (tclk_preparecnt + 1) * hsclk_p_ps < 95ns
-	 */
-	csi_setting->lptxtimecnt = csi_setting->tclk_preparecnt =
-		DIV_ROUND_UP(TC358748_LPTXTIME_MIN_NS * 1000, hsclk_p_ps) - 1;
-
-	/*
-	 * Limit:
-	 * (tclk_zero + tclk_prepar) period > 300ns.
-	 * Since we have no upper limit and for simplicity:
-	 * tclk_zero > 300ns.
-	 *
-	 * Calculation:
-	 * tclk_zero = ([2,3] + tclk_zerocnt) * hsclk_p_ps + ([2,3] * spl_p_ps)
-	 *
-	 * Note: REF_02 uses
-	 * tclk_zero = (2.5 + tclk_zerocnt) * hsclk_p_ps + (3.5 * spl_p_ps)
-	 */
-	tmp = TC358748_TCLKZERO_MIN_NS * 1000 - 3 * spl_p_ps;
-	tmp = DIV_ROUND_UP(tmp, hsclk_p_ps);
-	csi_setting->tclk_zerocnt = tmp - 2;
-
-	/*
-	 * Limit:
-	 * 40ns + 4 * spl_p_ps < (ths_preparecnt + 1) * hsclk_p_ps
-	 *		       < 85ns + 6 * spl_p_ps
-	 */
-	tmp = TC358748_THSPREPARE_MIN_NS * 1000 + 4 * spl_p_ps;
-	tmp = DIV_ROUND_UP(tmp, hsclk_p_ps);
-	csi_setting->ths_preparecnt = tmp - 1;
-
-	/*
-	 * Limit:
-	 * (ths_zero + ths_prepare) period > 145ns + 10 * spl_p_ps.
-	 * Since we have no upper limit and for simplicity:
-	 * ths_zero period > 145ns + 10 * spl_p_ps.
-	 *
-	 * Calculation:
-	 * ths_zero = ([6,8] + ths_zerocnt) * hsclk_p_ps + [3,4] * hsclk_p_ps +
-	 *	      [13,14] * spl_p_ps
-	 *
-	 * Note: REF_02 uses
-	 * ths_zero = (7 + ths_zerocnt) * hsclk_p_ps + 4 * hsclk_p_ps +
-	 *	      11 * spl_p_ps
-	 */
-	tmp = TC358748_THSZERO_MIN_NS * 1000 - spl_p_ps;
-	tmp = DIV_ROUND_UP(tmp, hsclk_p_ps);
-	csi_setting->ths_zerocnt = tmp < 11 ? 0 : tmp - 11;
-
-	/*
-	 * Limit:
-	 * hsclk_p_ps * (lptxtimecnt + 1) * (twakeupcnt + 1) > 1ms
-	 *
-	 * Since we have no upper limit use 1.2ms as lower limit to
-	 * surley meet the spec limit.
-	 */
-	tmp = hsclk_p_ps / 1000; /* tmp = hsclk_p_ns */
-	csi_setting->twakeupcnt =
-		DIV_ROUND_UP(TC358748_TWAKEUP_MIN_US * 1000,
-			     tmp * (csi_setting->lptxtimecnt + 1)) - 1;
-
-	/*
-	 * Limit:
-	 * 60ns + 4 * spl_p_ps < thstrail < 105ns + 12 * spl_p_ps
-	 *
-	 * Calculation:
-	 * thstrail = (1 + ths_trailcnt) * hsclk_p_ps + [3,4] * hsclk_p_ps -
-	 *	      [13,14] * spl_p_ps
-	 *
-	 * [2] set formula to:
-	 * thstrail = (1 + ths_trailcnt) * hsclk_p_ps + 4 * hsclk_p_ps -
-	 *	      11 * spl_p_ps
-	 */
-	tmp = TC358748_THSTRAIL_MIN_NS * 1000 + 15 * spl_p_ps;
-	tmp = DIV_ROUND_UP(tmp, hsclk_p_ps);
-	csi_setting->ths_trailcnt = tmp - 5;
-
-	/*
-	 * Limit:
-	 * 60ns < tclk_trail < 105ns + 12 * spl_p_ps
-	 *
-	 * Limit used by REF_02:
-	 * 60ns < tclk_trail < 105ns + 12 * spl_p_ps - 30
-	 *
-	 * Calculation:
-	 * tclk_trail = ([1,2] + tclk_trailcnt) * hsclk_p_ps +
-	 *		(2 + [1,2]) * hsclk_p_ps - [2,3] * spl_p_ps
-	 *
-	 * Calculation used by REF_02:
-	 * tclk_trail = (1 + tclk_trailcnt) * hsclk_p_ps +
-	 *		4 * hsclk_p_ps - 3 * spl_p_ps
-	 */
-	tmp = TC358748_TCLKTRAIL_MIN_NS * 1000 + 3 * spl_p_ps;
-	tmp = DIV_ROUND_UP(tmp, hsclk_p_ps);
-	csi_setting->tclk_trailcnt = tmp < 5 ? 0 : tmp - 5;
-
-	/*
-	 * Limit:
-	 * tclk_post > 60ns + 52 * spl_p_ps
-	 *
-	 * Limit used by REF_02:
-	 * tclk_post > 60ns + 52 * spl_p_ps
-	 *
-	 * Calculation:
-	 * tclk_post = ([1,2] + (tclk_postcnt + 1)) * hsclk_p_ps + hsclk_p_ps
-	 *
-	 * Note REF_02 uses:
-	 * tclk_post = (2.5 + tclk_postcnt) * hsclk_p_ps + hsclk_p_ps +
-	 *		2.5 * spl_p_ps
-	 * To meet the REF_02 validation limits following equation is used:
-	 * tclk_post = (2 + tclk_postcnt) * hsclk_p_ps + hsclk_p_ps +
-	 *		3 * spl_p_ps
-	 */
-	tmp = TC358748_TCLKPOST_MIN_NS * 1000 + 49 * spl_p_ps;
-	tmp = DIV_ROUND_UP(tmp, hsclk_p_ps);
-	csi_setting->tclk_postcnt = tmp - 3;
-
-	/*
-	 * Last calculate the csi hs->lp->hs transistion time in ns. Note REF_02
-	 * mixed units in the equation for the continuous case. I don't know if
-	 * this was the intention. The driver drops the last 'multiply all by
-	 * two' to get nearly the same results.
-	 */
-	lptxtime_ps = (csi_setting->lptxtimecnt + 1) * hsclk_p_ps;
-	tclk_post_ps =
-		(4 + csi_setting->tclk_postcnt) * hsclk_p_ps + 3 * spl_p_ps;
-	tclk_trail_ps =
-		(5 + csi_setting->tclk_trailcnt) * hsclk_p_ps - 3 * spl_p_ps;
-	tclk_zero_ps =
-		(2 + csi_setting->tclk_zerocnt) * hsclk_p_ps + 3 * spl_p_ps;
-	ths_trail_ps =
-		(5 + csi_setting->ths_trailcnt) * hsclk_p_ps - 11 * spl_p_ps;
-	ths_zero_ps =
-		(7 + csi_setting->ths_zerocnt) * hsclk_p_ps + 4 * hsclk_p_ps +
-		11 * spl_p_ps;
-
-	if (csi_setting->is_continuous_clk) {
-		tmp = 2 * lptxtime_ps;
-		tmp += 25 * hsclk_p_ps;
-		tmp += ths_trail_ps;
-		tmp += ths_zero_ps;
-	} else {
-		tmp = 4 * lptxtime_ps;
-		tmp += ths_trail_ps + tclk_post_ps + tclk_trail_ps +
-			tclk_zero_ps + ths_zero_ps;
-		tmp += (13 + csi_setting->lptxtimecnt * 8) * hsclk_p_ps;
-		tmp += 22 * hsclk_p_ps;
-		tmp *= 3;
-		tmp = DIV_ROUND_CLOSEST(tmp, 2);
-	}
-	csi_setting->csi_hs_lp_hs_ps = tmp;
-
-	return 0;
-}
 
 /* --------------- i2c helper ------------ */
 
@@ -1140,9 +926,9 @@ static int tc358748_log_status(struct v4l2_subdev *sd)
 	uint16_t sysctl = i2c_rd16(sd, SYSCTL);
 
 	v4l2_info(sd, "-----Chip status-----\n");
-	v4l2_info(sd, "Chip ID: 0x%02lx\n",
+	v4l2_info(sd, "Chip ID: 0x%02x\n",
 		  (i2c_rd16(sd, CHIPID) & CHIPID_CHIPID_MASK) >> 8);
-	v4l2_info(sd, "Chip revision: 0x%02lx\n",
+	v4l2_info(sd, "Chip revision: 0x%02x\n",
 		  i2c_rd16(sd, CHIPID) & CHIPID_REVID_MASK);
 	v4l2_info(sd, "Sleep mode: %s\n", sysctl & SYSCTL_SLEEP_MASK ?
 		  "on" : "off");
@@ -1578,8 +1364,8 @@ static const struct media_entity_operations tc358748_entity_ops = {
 
 /* --------------- PROBE / REMOVE --------------- */
 
-static int tc358748_set_lane_settings(struct tc358748_state *state,
-				      struct v4l2_fwnode_endpoint *fw)
+/*static int tc358748_set_lane_settings(struct tc358748_state *state,
+				      struct v4l2_of_endpoint *fw)
 {
 	struct device *dev = &state->i2c_client->dev;
 	int i;
@@ -1591,11 +1377,7 @@ static int tc358748_set_lane_settings(struct tc358748_state *state,
 
 		state->link_frequencies[i] = fw->link_frequencies[i];
 
-		/*
-		 * The CSI bps per lane must be between 62.5 Mbps and 1 Gbps.
-		 * bps_pr_lane = 2 * link_freq, because MIPI data lane is double
-		 * data rate.
-		 */
+		
 		bps_pr_lane = 2 * fw->link_frequencies[i];
 		if (bps_pr_lane < 62500000U || bps_pr_lane > 1000000000U) {
 			dev_err(dev, "unsupported bps per lane: %u bps\n",
@@ -1632,7 +1414,7 @@ static int tc358748_set_lane_settings(struct tc358748_state *state,
 	state->link_frequencies_num = fw->nr_of_link_frequencies;
 
 	return 0;
-}
+}*/
 static bool tc358748_parse_dt(struct tc358748_platform_data *pdata,
 		struct i2c_client *client)
 {
@@ -1830,7 +1612,8 @@ static int tc358748_probe_of(struct tc358748_state *state)
 		pr_info("Calling reset GPIO but NOT IMPLEMENTED!");
 		tc358748_gpio_reset(state);
 	}
-	ret = 0;
+	ret =0;
+	
 	goto free_endpoint;
 
 disable_clk:
@@ -1839,12 +1622,12 @@ free_endpoint:
 	v4l2_of_free_endpoint(endpoint);
 	return ret;
 }
-#else
+/*#else
 static inline int tc358748_probe_of(struct tc358748_state *state)
 {
 	return -ENODEV;
 }
-#endif
+#endif*/
 
 static int tc358748_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 {
@@ -1866,21 +1649,22 @@ static const struct regmap_config sensor_regmap_config = {
 	.cache_type = REGCACHE_RBTREE,
 };
 
+
+
+static const char * const tc358764_test_pattern_menu[] = {
+	"Disabled",
+	"colorbar 80px",
+};
+
 static int tc358748_probe(struct i2c_client *client,
 			  const struct i2c_device_id *id)
 {
-	static struct v4l2_dv_timings default_timing =
-//	V4L2_DV_BT_CEA_1920X1080P60;
-//	V4L2_DV_BT_CEA_1920X1080P60;
-	V4L2_DV_BT_CEA_1280X720P60;
-
-
-   
+	   
 	struct tc358748_state *state;
 	struct tc358748_platform_data *pdata = client->dev.platform_data;
 	struct v4l2_subdev *sd;
 	int err;
-	u16 chip_id_val;
+	//u16 chip_id_val;
 
     // pr_info("%s %s %s\n",__FUNCTION__,__DATE__,__TIME__);
 
@@ -1924,7 +1708,7 @@ static int tc358748_probe(struct i2c_client *client,
 	if (((i2c_rd16(sd, CHIPID) & CHIPID_CHIPID_MASK) >> 8) != 0x44) {
 		v4l2_info(sd, "not a TC358748 on address 0x%x\n",
 			  client->addr << 1);
-		return -ENODEV;
+		//return -ENODEV;
 	}
 
 	/* control handlers */
@@ -1951,7 +1735,7 @@ static int tc358748_probe(struct i2c_client *client,
 
 	state->pads[1].flags = MEDIA_PAD_FL_SOURCE;
 	state->pads[0].flags = MEDIA_PAD_FL_SINK;
-	sd->entity.function = MEDIA_ENT_F_VID_IF_BRIDGE;
+	//sd->entity.function = MEDIA_ENT_F_VID_IF_BRIDGE;
 	sd->entity.ops = &tc358748_entity_ops;
 	err = media_entity_pads_init(&sd->entity, 2, state->pads);
 	if (err < 0)
@@ -1970,7 +1754,7 @@ static int tc358748_probe(struct i2c_client *client,
 	tc358748_set_pll(sd);
 	tc358748_enable_stream(sd, 0);
 
-	err = tc358748_async_register(sd);
+	err = v4l2_async_register_subdev(sd);
 	if (err < 0)
 		goto err_hdl;
 
