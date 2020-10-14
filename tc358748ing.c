@@ -724,50 +724,40 @@ static inline void tc358748_enable_stream(struct v4l2_subdev *sd, int enable)
 
 static void tc358748_set_pll(struct v4l2_subdev *sd)
 {
-	struct tc358748_state *state = to_state(sd);
-	struct tc358748_csi_param *csi_setting =
-		tc358748_g_cur_csi_settings(state);
-	struct device *dev = &state->i2c_client->dev;
+	struct tc358743_state *state = to_state(sd);
 	struct tc358743_platform_data *pdata = &state->pdata;
 	u16 pllctl0 = i2c_rd16(sd, PLLCTL0);
 	u16 pllctl1 = i2c_rd16(sd, PLLCTL1);
-	u16 pll_frs = csi_setting->speed_range;
-	u16 pllctl0_new;
+	u16 pllctl0_new = SET_PLL_PRD(pdata->pll_prd) |
+		SET_PLL_FBD(pdata->pll_fbd);
+	u32 hsck = (pdata->refclk_hz / pdata->pll_prd) * pdata->pll_fbd;
 
-	/*
-	 * Calculation:
-	 * speed_per_lane = (pllinclk_hz * (fbd + 1)) / 2^frs
-	 *
-	 * Calculation used by REF_02:
-	 * speed_per_lane = (pllinclk_hz * fbd) / 2^frs
-	 */
-	pdata->pll_fbd = csi_setting->speed_per_lane / pdata->refclk_hz;
-	pdata->pll_fbd <<= pll_frs;
+	v4l2_info(sd, "%s:\n", __func__);
 
-	pllctl0_new = PLLCTL0_PLL_PRD_SET(pdata->pll_prd) |
-		      PLLCTL0_PLL_FBD_SET(pdata->pll_prd);
+	/* Only rewrite when needed (new value or disabled), since rewriting
+	 * triggers another format change event. */
+	if ((pllctl0 != pllctl0_new) || ((pllctl1 & MASK_PLL_EN) == 0)) {
+		u16 pll_frs;
 
-	/*
-	 * Only rewrite when needed (new value or disabled), since rewriting
-	 * triggers another format change event.
-	 */
-	if ((pllctl0 != pllctl0_new) ||
-	    ((pllctl1 & PLLCTL1_PLL_EN_MASK) == 0)) {
-		u16 pllctl1_mask = (u16) ~(PLLCTL1_PLL_FRS_MASK |
-					   PLLCTL1_RESETB_MASK  |
-					   PLLCTL1_PLL_EN_MASK);
-		u16 pllctl1_val = PLLCTL1_PLL_FRS_SET(pll_frs) |
-				  PLLCTL1_RESETB_MASK | PLLCTL1_PLL_EN_MASK;
-
-		dev_dbg(dev, "updating PLL clock\n");
+		if (hsck > 500000000)
+			pll_frs =0x0;
+		else if (hsck > 250000000)
+			pll_frs =0x1;
+		else if (hsck > 125000000)
+			pll_frs =0x2;
+		else
+			pll_frs =0x3;
+		v4l2_info(sd, "%s: updating PLL clock\n", __func__);
+		
 		i2c_wr16(sd, PLLCTL0, pllctl0_new);
-		i2c_wr16_and_or(sd, PLLCTL1, pllctl1_mask, pllctl1_val);
-		udelay(1000);
-		i2c_wr16_and_or(sd, PLLCTL1, ~PLLCTL1_CKEN_MASK,
-				PLLCTL1_CKEN_MASK);
+		i2c_wr16_and_or(sd, PLLCTL1,
+				~(MASK_PLL_FRS | MASK_RESETB | MASK_PLL_EN),
+				(SET_PLL_FRS(pll_frs) | MASK_RESETB |
+				 MASK_PLL_EN));
+		udelay(10); /* REF_02, Sheet "Source HDMI" */
+		i2c_wr16_and_or(sd, PLLCTL1, ~MASK_CKEN, MASK_CKEN);
+		
 	}
-
-	tc358748_dump_pll(dev, state);
 }
 
 static void tc358748_set_csi_color_space(struct v4l2_subdev *sd)
