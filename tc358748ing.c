@@ -1323,11 +1323,13 @@ static const struct v4l2_ctrl_ops tc358764_ctrl_ops = {
 
 static const struct v4l2_subdev_core_ops tc358748_core_ops = {
 	.log_status = tc358748_log_status,
+	.s_power = tc358748_s_power,
 #ifdef CONFIG_VIDEO_ADV_DEBUG
 	.g_register = tc358748_g_register,
 	.s_register = tc358748_s_register,
 #endif
-	.s_power = tc358748_s_power,
+	
+	.unsubscribe_event = v4l2_event_subdev_unsubscribe,
 };
 
 static const struct v4l2_subdev_video_ops tc358748_video_ops = {
