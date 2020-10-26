@@ -724,40 +724,49 @@ static inline void tc358748_enable_stream(struct v4l2_subdev *sd, int enable)
 
 static void tc358748_set_pll(struct v4l2_subdev *sd)
 {
-	struct tc358743_state *state = to_state(sd);
-	struct tc358743_platform_data *pdata = &state->pdata;
+	struct tc358748_state *state = to_state(sd);
+	struct tc358748_csi_param *csi_setting =
+		tc358748_g_cur_csi_settings(state);
+	struct device *dev = &state->i2c_client->dev;
 	u16 pllctl0 = i2c_rd16(sd, PLLCTL0);
 	u16 pllctl1 = i2c_rd16(sd, PLLCTL1);
-	u16 pllctl0_new = SET_PLL_PRD(pdata->pll_prd) |
-		SET_PLL_FBD(pdata->pll_fbd);
-	u32 hsck = (pdata->refclk_hz / pdata->pll_prd) * pdata->pll_fbd;
+	u16 pll_frs = csi_setting->speed_range;
+	u16 pllctl0_new;
 
-	v4l2_info(sd, "%s:\n", __func__);
+	/*
+	 * Calculation:
+	 * speed_per_lane = (pllinclk_hz * (fbd + 1)) / 2^frs
+	 *
+	 * Calculation used by REF_02:
+	 * speed_per_lane = (pllinclk_hz * fbd) / 2^frs
+	 */
+	state->pll_fbd = csi_setting->speed_per_lane / state->pllinclk_hz;
+	state->pll_fbd <<= pll_frs;
 
-	/* Only rewrite when needed (new value or disabled), since rewriting
-	 * triggers another format change event. */
-	if ((pllctl0 != pllctl0_new) || ((pllctl1 & MASK_PLL_EN) == 0)) {
-		u16 pll_frs;
+	pllctl0_new = PLLCTL0_PLL_PRD_SET(state->pll_prd) |
+		      PLLCTL0_PLL_FBD_SET(state->pll_fbd);
 
-		if (hsck > 500000000)
-			pll_frs =0x0;
-		else if (hsck > 250000000)
-			pll_frs =0x1;
-		else if (hsck > 125000000)
-			pll_frs =0x2;
-		else
-			pll_frs =0x3;
-		v4l2_info(sd, "%s: updating PLL clock\n", __func__);
-		
+	/*
+	 * Only rewrite when needed (new value or disabled), since rewriting
+	 * triggers another format change event.
+	 */
+	if ((pllctl0 != pllctl0_new) ||
+	    ((pllctl1 & PLLCTL1_PLL_EN_MASK) == 0)) {
+		u16 pllctl1_mask = (u16) ~(PLLCTL1_PLL_FRS_MASK |
+					   PLLCTL1_RESETB_MASK  |
+					   PLLCTL1_PLL_EN_MASK);
+		u16 pllctl1_val = PLLCTL1_PLL_FRS_SET(pll_frs) |
+				  PLLCTL1_RESETB_MASK | PLLCTL1_PLL_EN_MASK;
+
+		dev_dbg(dev, "updating PLL clock\n");
 		i2c_wr16(sd, PLLCTL0, pllctl0_new);
-		i2c_wr16_and_or(sd, PLLCTL1,
-				~(MASK_PLL_FRS | MASK_RESETB | MASK_PLL_EN),
-				(SET_PLL_FRS(pll_frs) | MASK_RESETB |
-				 MASK_PLL_EN));
-		udelay(10); /* REF_02, Sheet "Source HDMI" */
-		i2c_wr16_and_or(sd, PLLCTL1, ~MASK_CKEN, MASK_CKEN);
-		
+		i2c_wr16_and_or(sd, PLLCTL1, pllctl1_mask, pllctl1_val);
+		udelay(1000);
+		i2c_wr16_and_or(sd, PLLCTL1, ~PLLCTL1_CKEN_MASK,
+				PLLCTL1_CKEN_MASK);
 	}
+
+	tc358748_dump_pll(dev, state);
 }
 
 static void tc358748_set_csi_color_space(struct v4l2_subdev *sd)
@@ -1029,7 +1038,7 @@ static int tc358748_g_mbus_config(struct v4l2_subdev *sd,
 static int tc358748_s_power(struct v4l2_subdev *sd, int on)
 {
 	struct tc358748_state *state = to_state(sd);
-
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	/*
 	 * REF_01:
 	 * Softreset don't reset configuration registers content but is needed
@@ -1061,7 +1070,7 @@ static int tc358748_s_power(struct v4l2_subdev *sd, int on)
 static int tc358748_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	tc358748_enable_stream(sd, enable);
-
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	return 0;
 }
 
@@ -1101,7 +1110,7 @@ static int tc358748_get_fmt(struct v4l2_subdev *sd,
 		struct v4l2_subdev_format *format)
 {
 	struct tc358748_state *state = to_state(sd);
-
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	if (format->pad != 0 && format->pad != 1)
 		return -EINVAL;
 
@@ -1117,6 +1126,7 @@ static int tc358748_set_fmt(struct v4l2_subdev *sd,
 			    struct v4l2_subdev_pad_config *cfg,
 			    struct v4l2_subdev_format *format)
 {
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct tc358748_state *state = to_state(sd);
 	struct device *dev = &state->i2c_client->dev;
 	struct media_pad *pad = &state->pads[format->pad];
@@ -1323,13 +1333,11 @@ static const struct v4l2_ctrl_ops tc358764_ctrl_ops = {
 
 static const struct v4l2_subdev_core_ops tc358748_core_ops = {
 	.log_status = tc358748_log_status,
-	.s_power = tc358748_s_power,
 #ifdef CONFIG_VIDEO_ADV_DEBUG
 	.g_register = tc358748_g_register,
 	.s_register = tc358748_s_register,
 #endif
-	
-	.unsubscribe_event = v4l2_event_subdev_unsubscribe,
+	.s_power = tc358748_s_power,
 };
 
 static const struct v4l2_subdev_video_ops tc358748_video_ops = {
@@ -1532,10 +1540,10 @@ static int tc358748_probe_of(struct tc358748_state *state)
 	 * The default is 594 Mbps for 4-lane 1080p60 or 2-lane 720p60.
 	 */
 	bps_pr_lane = 2 * endpoint->link_frequencies[0];
-	/*if (bps_pr_lane < 62500000U || bps_pr_lane > 1000000000U) {
+	if (bps_pr_lane < 62500000U || bps_pr_lane > 1000000000U) {
 		dev_err(dev, "unsupported bps per lane: %u bps\n", bps_pr_lane);
 		goto disable_clk;
-	}*/
+	}
 
 	/* The CSI speed per lane is refclk / pll_prd * pll_fbd */
 	state->pdata.pll_fbd = bps_pr_lane /
@@ -1730,7 +1738,7 @@ static int tc358748_probe(struct i2c_client *client,
 	state->pads[0].flags = MEDIA_PAD_FL_SINK;
 	//sd->entity.function = MEDIA_ENT_F_VID_IF_BRIDGE;
 	sd->entity.ops = &tc358748_entity_ops;
-	err = media_entity_pads_init(&sd->entity, 2, state->pads);
+	err = tegra_media_entity_init(&sd->entity, 2, state->pads);
 	if (err < 0)
 		goto err_hdl;
 
