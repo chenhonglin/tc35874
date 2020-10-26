@@ -65,3 +65,10 @@ sudo ./flash.sh jetson-nano-qspi-sd mmcblk0p1
 
 (DTB 디바이스트리만 업로드)
 sudo ./flash.sh -r -k DTB jetson-nano-qspi-sd mmcblk0p1
+
+
+==========================tc만컴파일=============
+rm -rf ./build/.tmp_versions/
+rm -rf ./build/drivers/media/i2c/
+find -name "tc35874*"
+make -C kernel/kernel-4.9/ ARCH=arm64 O=$TEGRA_KERNEL_OUT LOCALVERSION=-tegra CROSS_COMPILE=${TOOLCHAIN_PREFIX} -j4 --output-sync=target modules
