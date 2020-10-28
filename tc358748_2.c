@@ -544,38 +544,20 @@ static inline void enable_stream(struct v4l2_subdev *sd, bool enable)
 		//Start/Stop stream.
 	//v4l2_info(sd, "%s: %sable\n",	__func__, enable ? "en" : "dis");
 
-	if (enable) {
-		/* It is critical for CSI receiver to see lane transition
-		 * LP11->HS. Set to non-continuous mode to enable clock lane
-		 * LP11 state. */
-		 //  Start Stream
- 		//To Start TC358746A (video):
-		// 1 Clear RstPtr and FrmStop to 1’b0
-		// 2 Set PP_En to 1’b1
-		printk("TC358748 SETUP: Stream Started!!");
-		i2c_wr16(sd, PP_MISC, 0);
-		i2c_wr16_and_or(sd, CONFCTL, ~CONFCTL_PPEN_MASK, CONFCTL_PPEN_MASK);
-		//746src_ i2c__wr32(sd, TXOPTIONCNTRL, 0);
-		/* Set to continuous mode to trigger LP11->HS transition */
-		//746src_ i2c__wr32(sd, TXOPTIONCNTRL, MASK_CONTCLKMODE);
-		/* Unmute video */
-		//746src_ i2c__wr8(sd, VI_MUTE, MASK_AUTO_MUTE);
-	} else {
-		//TODO: STOP Stream
-		//To stop TC358746A (video):
-		// 1 Set FrmStop to 1’b1, wait for at least one frame time for TC358746A to stop properly
-		// 2 Clear PP_En to 1’b0
-		// 3 Set RstPtr to 1’b1
-		printk("TC358748 SETUP: Stream STOPPED!!");
-		i2c_wr16_and_or(sd, PP_MISC, PP_MISC_FRMSTOP_MASK_NOT, PP_MISC_FRMSTOP_MASK);
-		
+	if (!enable) {
+		i2c_wr16_and_or(sd, PP_MISC, ~PP_MISC_FRMSTOP_MASK,
+				PP_MISC_FRMSTOP_MASK);
 		i2c_wr16_and_or(sd, CONFCTL, ~CONFCTL_PPEN_MASK, 0);
-		i2c_wr16_and_or(sd, PP_MISC, ~PP_MISC_RSTPTR_MASK, PP_MISC_RSTPTR_MASK);
-		i2c_wr32(sd, CSIRESET, (CSIRESET_RESET_CNF_MASK | CSIRESET_RESET_MODULE_MASK));
+		i2c_wr16_and_or(sd, PP_MISC, ~PP_MISC_RSTPTR_MASK,
+				PP_MISC_RSTPTR_MASK);
+
+		i2c_wr32(sd, CSIRESET, (CSIRESET_RESET_CNF_MASK |
+					CSIRESET_RESET_MODULE_MASK));
 		i2c_wr16(sd, DBG_ACT_LINE_CNT, 0);
-		/* Mute video so that all data lanes go to LSP11 state.
-		 * No data is output to CSI Tx block. */
-		//746src_ i2c__wr8(sd, VI_MUTE, MASK_AUTO_MUTE | MASK_VI_MUTE);
+	} else {
+		i2c_wr16(sd, PP_MISC, 0);
+		i2c_wr16_and_or(sd, CONFCTL, ~CONFCTL_PPEN_MASK,
+				CONFCTL_PPEN_MASK);
 	}
 	//csi ERR Register.
 	
