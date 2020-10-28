@@ -1112,7 +1112,9 @@ static int tc358748_s_dv_timings(struct v4l2_subdev *sd,
 	}
 
 	state->timings = *timings;
-	
+	enable_stream(sd, false);
+	tc358748_set_pll(sd);
+	tc358748_set_csi(sd);
 	return 0;
 }
 
@@ -1326,7 +1328,10 @@ static int tc358748_set_fmt(struct v4l2_subdev *sd,
 
 	state->mbus_fmt_code = format->format.code;
 
-
+	enable_stream(sd, false);
+	tc358748_set_pll(sd);
+	tc358748_set_csi(sd);
+	tc358748_set_csi_color_space(sd);
 	v4l2_info(sd, "Called %s, completed successfully\n", __FUNCTION__);
 	return 0;
 }
