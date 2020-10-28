@@ -212,206 +212,7 @@ struct tc358748_state {
 
 	struct gpio_desc *reset_gpio;
 };
-struct tc358748_mbus_fmt {
-	u32 code;
-	u8 bus_width;
-	u8 bpp;		 /* total bpp */
-	u8 pdformat;	 /* peripheral data format */
-	u8 pdataf;	 /* parallel data format option */
-	u8 ppp;		 /* pclk per pixel */
-	bool csitx_only; /* format only in csi-tx mode supported */
-};
 
-/* TODO: Add other formats as required */
-static const struct tc358748_mbus_fmt tc358748_formats[] = {
-	{
-		.code = MEDIA_BUS_FMT_UYVY8_2X8,
-		.bus_width = 8,
-		.bpp = 16,
-		.pdformat = DATAFMT_PDFMT_YCBCRFMT_422_8_BIT,
-		.pdataf = CONFCTL_PDATAF_MODE0,
-		.ppp = 2,
-	}, {
-		.code = MEDIA_BUS_FMT_UYVY8_1X16,
-		.bus_width = 16,
-		.bpp = 16,
-		.pdformat = DATAFMT_PDFMT_YCBCRFMT_422_8_BIT,
-		.pdataf = CONFCTL_PDATAF_MODE1,
-		.ppp = 1,
-	}, {
-		.code = MEDIA_BUS_FMT_YUYV8_1X16,
-		.bus_width = 16,
-		.bpp = 16,
-		.pdformat = DATAFMT_PDFMT_YCBCRFMT_422_8_BIT,
-		.pdataf = CONFCTL_PDATAF_MODE2,
-		.ppp = 1,
-	}, {
-		.code = MEDIA_BUS_FMT_UYVY10_2X10,
-		.bus_width = 10,
-		.bpp = 20,
-		.pdformat = DATAFMT_PDFMT_YCBCRFMT_422_10_BIT,
-		.pdataf = CONFCTL_PDATAF_MODE0, /* don't care */
-		.ppp = 2,
-	}, {
-		/* in datasheet listed as YUV444 */
-		.code = MEDIA_BUS_FMT_GBR888_1X24,
-		.bus_width = 24,
-		.bpp = 24,
-		.pdformat = DATAFMT_PDFMT_YCBCRFMT_444,
-		.pdataf = CONFCTL_PDATAF_MODE0, /* don't care */
-		.ppp = 2,
-		.csitx_only = true,
-	},
-};
-static const struct tc358748_mbus_fmt *tc358748_get_format(u32 code)
-{
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(tc358748_formats); i++)
-		if (tc358748_formats[i].code == code)
-			return &tc358748_formats[i];
-
-	return NULL;
-}
-static const struct tc358748_mbus_fmt *tc358748_get_format(u32 code)
-{
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(tc358748_formats); i++)
-		if (tc358748_formats[i].code == code)
-			return &tc358748_formats[i];
-
-	return NULL;
-}
-
-static int
-tc358748_adjust_fifo_size(struct tc358748_state *state,
-			  const struct tc358748_mbus_fmt *format,
-			  struct tc358748_csi_param *csi_settings,
-			  int width, u16 *fifo_size)
-{
-	struct device *dev = &state->i2c_client->dev;
-	int c_hactive_ps_diff, c_lp_active_ps_diff, c_fifo_delay_ps_diff;
-	unsigned int p_hactive_ps, p_hblank_ps, p_htotal_ps;
-	unsigned int c_hactive_ps, c_lp_active_ps, c_fifo_delay_ps;
-	unsigned int csi_bps, csi_bps_period_ps;
-	unsigned int csi_hsclk, csi_hsclk_period_ps;
-	unsigned int pclk_period_ps;
-	unsigned int _fifo_size;
-
-	pclk_period_ps = 1000000000 / (state->pclk / 1000);
-	csi_bps = csi_settings->speed_per_lane * csi_settings->lane_num;
-	csi_bps_period_ps = 1000000000 / (csi_bps / 1000);
-	csi_hsclk = csi_settings->speed_per_lane >> 3;
-	csi_hsclk_period_ps = 1000000000 / (csi_hsclk / 1000);
-
-	/*
-	 * Calculation:
-	 * p_hactive_ps = pclk_period_ps * pclk_per_pixel * h_active_pixel
-	 */
-	p_hactive_ps = pclk_period_ps * format->ppp * width;
-
-	/*
-	 * Calculation:
-	 * p_hblank_ps = pclk_period_ps * h_blank_pixel
-	 */
-	p_hblank_ps = pclk_period_ps * state->hblank;
-	p_htotal_ps = p_hblank_ps + p_hactive_ps;
-
-	/*
-	 * Adjust the fifo size to adjust the csi timing. Hopefully we can find
-	 * a fifo size where the parallel input timings and the csi tx timings
-	 * fit together.
-	 */
-	for (_fifo_size = 1; _fifo_size < TC358748_MAX_FIFO_SIZE;
-	     _fifo_size++) {
-		/*
-		 * Calculation:
-		 * c_fifo_delay_ps = (fifo_size * 32) / parallel_bus_width *
-		 *		     pclk_period_ps + 4 * csi_hsclk_period_ps
-		 */
-		c_fifo_delay_ps = _fifo_size * 32 * pclk_period_ps;
-		c_fifo_delay_ps /= format->bus_width;
-		c_fifo_delay_ps += 4 * csi_hsclk_period_ps;
-
-		/*
-		 * Calculation:
-		 * c_hactive_ps = csi_bps_period_ps * image_bpp * h_active_pixel
-		 *		  + c_fifo_delay
-		 */
-		c_hactive_ps = csi_bps_period_ps * format->bpp * width;
-		c_hactive_ps += c_fifo_delay_ps;
-
-		/*
-		 * Calculation:
-		 * c_lp_active_ps = p_htotal_ps - c_hactive_ps
-		 */
-		c_lp_active_ps = p_htotal_ps - c_hactive_ps;
-
-		c_hactive_ps_diff = c_hactive_ps - p_hactive_ps;
-		c_fifo_delay_ps_diff = p_htotal_ps - c_hactive_ps;
-		c_lp_active_ps_diff =
-			c_lp_active_ps - csi_settings->csi_hs_lp_hs_ps;
-
-		if (c_hactive_ps_diff > 0 &&
-		    c_fifo_delay_ps_diff > 0 &&
-		    c_lp_active_ps_diff > 0)
-			break;
-	}
-	/*
-	 * If we can't transfer the image using this csi link frequency try to
-	 * use another link freq.
-	 */
-
-	dev_dbg(dev, "%s: found fifo-size %u\n", __func__, _fifo_size);
-	*fifo_size = _fifo_size;
-	return _fifo_size == TC358748_MAX_FIFO_SIZE ? -EINVAL : 0;
-}
-
-static int
-tc358748_adjust_timings(struct tc358748_state *state,
-			const struct tc358748_mbus_fmt *format,
-			int *width, u16 *fifo_size)
-{
-
-	int cur_freq = v4l2_ctrl_g_ctrl(state->link_freq);
-	int freq = cur_freq;
-	struct tc358748_csi_param *csi_lane_setting;
-	int err;
-	int _width;
-
-	/*
-	 * Adjust timing:
-	 * 1) Try to use the desired width and the current csi-link-frequency
-	 * 2) If this doesn't fit try other csi-link-frequencies
-	 * 3) If this doesn't fit too, reducing the desired width and test
-	 *    it again width the current csi-link-frequency
-	 * 4) Goto step 2 if it doesn't fit at all
-	 */
-	for (_width = *width; _width > 0; _width -= 10) {se
-		csi_lane_setting = &state->link_freq_settings[cur_freq];
-		err = tc358748_adjust_fifo_size(state, format, csi_lane_setting,
-						_width, fifo_size);
-		if (!err)
-			goto out;
-
-		for (freq = 0; freq < state->link_frequencies_num; freq++) {
-			if (freq == cur_freq)
-				continue;
-
-			csi_lane_setting = &state->link_freq_settings[freq];
-			err = tc358748_adjust_fifo_size(state, format,
-							csi_lane_setting,
-							_width, fifo_size);
-			if (!err)
-				goto out;
-		}
-	}
-
-out:
-	*width = _width;
-	return freq;
-}
 static inline struct tc358748_state *to_state(struct v4l2_subdev *sd)
 {
 	return container_of(sd, struct tc358748_state, sd);
@@ -743,20 +544,38 @@ static inline void enable_stream(struct v4l2_subdev *sd, bool enable)
 		//Start/Stop stream.
 	//v4l2_info(sd, "%s: %sable\n",	__func__, enable ? "en" : "dis");
 
-	if (!enable) {
-		i2c_wr16_and_or(sd, PP_MISC, PP_MISC_FRMSTOP_MASK_NOT,
-				PP_MISC_FRMSTOP_MASK);
-		i2c_wr16_and_or(sd, CONFCTL, ~CONFCTL_PPEN_MASK, 0);
-		i2c_wr16_and_or(sd, PP_MISC, ~PP_MISC_RSTPTR_MASK,
-				PP_MISC_RSTPTR_MASK);
-
-		i2c_wr32(sd, CSIRESET, (CSIRESET_RESET_CNF_MASK |
-					CSIRESET_RESET_MODULE_MASK));
-		i2c_wr16(sd, DBG_ACT_LINE_CNT, 0);
-	} else {
+	if (enable) {
+		/* It is critical for CSI receiver to see lane transition
+		 * LP11->HS. Set to non-continuous mode to enable clock lane
+		 * LP11 state. */
+		 //  Start Stream
+ 		//To Start TC358746A (video):
+		// 1 Clear RstPtr and FrmStop to 1’b0
+		// 2 Set PP_En to 1’b1
+		printk("TC358748 SETUP: Stream Started!!");
 		i2c_wr16(sd, PP_MISC, 0);
-		i2c_wr16_and_or(sd, CONFCTL, ~CONFCTL_PPEN_MASK,
-				CONFCTL_PPEN_MASK);
+		i2c_wr16_and_or(sd, CONFCTL, ~CONFCTL_PPEN_MASK, CONFCTL_PPEN_MASK);
+		//746src_ i2c__wr32(sd, TXOPTIONCNTRL, 0);
+		/* Set to continuous mode to trigger LP11->HS transition */
+		//746src_ i2c__wr32(sd, TXOPTIONCNTRL, MASK_CONTCLKMODE);
+		/* Unmute video */
+		//746src_ i2c__wr8(sd, VI_MUTE, MASK_AUTO_MUTE);
+	} else {
+		//TODO: STOP Stream
+		//To stop TC358746A (video):
+		// 1 Set FrmStop to 1’b1, wait for at least one frame time for TC358746A to stop properly
+		// 2 Clear PP_En to 1’b0
+		// 3 Set RstPtr to 1’b1
+		printk("TC358748 SETUP: Stream STOPPED!!");
+		i2c_wr16_and_or(sd, PP_MISC, PP_MISC_FRMSTOP_MASK_NOT, PP_MISC_FRMSTOP_MASK);
+		
+		i2c_wr16_and_or(sd, CONFCTL, ~CONFCTL_PPEN_MASK, 0);
+		i2c_wr16_and_or(sd, PP_MISC, ~PP_MISC_RSTPTR_MASK, PP_MISC_RSTPTR_MASK);
+		i2c_wr32(sd, CSIRESET, (CSIRESET_RESET_CNF_MASK | CSIRESET_RESET_MODULE_MASK));
+		i2c_wr16(sd, DBG_ACT_LINE_CNT, 0);
+		/* Mute video so that all data lanes go to LSP11 state.
+		 * No data is output to CSI Tx block. */
+		//746src_ i2c__wr8(sd, VI_MUTE, MASK_AUTO_MUTE | MASK_VI_MUTE);
 	}
 	//csi ERR Register.
 	
@@ -1189,10 +1008,12 @@ static void tc358748_print_register_map(struct v4l2_subdev *sd)
 static int tc358748_get_reg_size(u16 address)
 {
 	/* REF_01 p. 66-72 */
-	if (address <= 0x00ff)
+	if (address <=0x00ff)
 		return 2;
-	else if ((address >= 0x0100) && (address <= 0x05FF))
+	else if ((address >=0x0100) && (address <=0x06FF))
 		return 4;
+	else if ((address >=0x0700) && (address <=0x84ff))
+		return 2;
 	else
 		return 1;
 }
@@ -1207,7 +1028,6 @@ static int tc358748_g_register(struct v4l2_subdev *sd,
 
 	reg->size = tc358748_get_reg_size(reg->reg);
 	// no return i2c__rd(sd, reg->reg, (u8 *)&reg->val, reg->size);
-	reg->val = i2c_rdreg(sd, reg->reg, reg->size);
 	return 0;
 }
 
@@ -1225,8 +1045,12 @@ static int tc358748_s_register(struct v4l2_subdev *sd,
 	 * DO NOT REMOVE THIS unless all other issues with HDCP have been
 	 * resolved.
 	 */
-	i2c_wrreg(sd, (u16)reg->reg, reg->val,
-			tc358748_get_reg_size(reg->reg));
+	if (reg->reg == HDCP_MODE ||
+	    reg->reg == HDCP_REG1 ||
+	    reg->reg == HDCP_REG2 ||
+	    reg->reg == HDCP_REG3 ||
+	    reg->reg == BCAPS)
+		return 0;
 
 	//746src_ i2c__wr(sd, (u16)reg->reg, (u8 *)&reg->val, tc358748_get_reg_size(reg->reg));
 
@@ -1288,9 +1112,7 @@ static int tc358748_s_dv_timings(struct v4l2_subdev *sd,
 	}
 
 	state->timings = *timings;
-	enable_stream(sd, false);
-	tc358748_set_pll(sd);
-	tc358748_set_csi(sd);
+	
 	return 0;
 }
 
@@ -1478,76 +1300,34 @@ static int tc358748_set_fmt(struct v4l2_subdev *sd,
 		                    struct v4l2_subdev_format *format)
 {
 	struct tc358748_state *state = to_state(sd);
-	struct device *dev = &state->i2c_client->dev;
-	struct media_pad *pad = &state->pads[format->pad];
-	struct media_pad *remote_sensor_pad =
-		media_entity_remote_pad(&state->pads[0]);
-	struct v4l2_subdev *sensor_sd;
-	struct v4l2_mbus_framefmt *mbusformat;
-	const struct tc358748_mbus_fmt *tc358748_mbusformat;
-	struct v4l2_ctrl *ctrl;
-	unsigned int pclk, hblank;
-	int new_freq, cur_freq = v4l2_ctrl_g_ctrl(state->link_freq);
-	u16 vb_fifo;
+	u32 code = format->format.code;
+	int ret = tc358748_get_fmt(sd, cfg, format);
 
-	if (pad->flags == MEDIA_PAD_FL_SOURCE)
-		return tc358748_get_fmt(sd, cfg, format);
+	v4l2_dbg(3, debug, sd, "%s(), ret: %d\n", __func__, ret);
+	v4l2_dbg(3, debug, sd, "Set format code: %d\n", code);
 
-	mbusformat = __tc358748_get_pad_format(sd, cfg, format->pad,
-					       format->which);
-	if (!mbusformat)
-		return -EINVAL;
+	format->format.code = code;
 
-	tc358748_mbusformat = tc358748_get_format(format->format.code);
-	if (!tc358748_mbusformat) {
-		format->format.code = tc358748_def_fmt.code;
-		tc358748_mbusformat = tc358748_get_format(format->format.code);
+	if (ret)
+		return ret;
+
+	switch (code) {
+		case MEDIA_BUS_FMT_RGB888_1X24:
+		case MEDIA_BUS_FMT_UYVY8_1X16:
+			v4l2_dbg(3, debug, sd, "Good code %d\n", code);
+			break;
+		default:
+			v4l2_err(sd, "Bad code %d\n", code);
+			return -EINVAL;
 	}
 
-	/*
-	 * Some sensors change their hblank and pclk value on different formats,
-	 * so we need to request it again.
-	 */
-	sensor_sd = media_entity_to_v4l2_subdev(remote_sensor_pad->entity);
-	ctrl = v4l2_ctrl_find(sensor_sd->ctrl_handler, V4L2_CID_PIXEL_RATE);
-	pclk = v4l2_ctrl_g_ctrl_int64(ctrl);
-	if (pclk != state->pclk) {
-		dev_dbg(dev, "Update pclk from %u to %u\n", state->pclk, pclk);
-		state->pclk = pclk;
-	}
-	ctrl = v4l2_ctrl_find(sensor_sd->ctrl_handler, V4L2_CID_HBLANK);
-	hblank = v4l2_ctrl_g_ctrl(ctrl);
-	if (hblank != state->hblank) {
-		dev_dbg(dev, "Update hblank from %u to %u\n", state->hblank,
-			hblank);
-		state->hblank = hblank;
-	}
+	if (format->which == V4L2_SUBDEV_FORMAT_TRY)
+		return 0;
 
-	/*
-	 * Normaly the HW has no size limitations but we have to check if the
-	 * csi timings are valid for this size. The timings can be adjust by the
-	 * fifo size. If this doesn't work we have to do this check again with a
-	 * other csi link frequency if it is possible.
-	 */
-	new_freq = tc358748_adjust_timings(state, tc358748_mbusformat,
-					   &format->format.width, &vb_fifo);
+	state->mbus_fmt_code = format->format.code;
 
-	/* Currently only a few YUV based formats are supported */
-	if (tc358748_format_supported(format->format.code))
-		format->format.code = MEDIA_BUS_FMT_UYVY8_2X8;
 
-	/* Currently only non interleaved images are supported */
-	format->format.field = V4L2_FIELD_NONE;
-
-	*mbusformat = format->format;
-
-	if (format->which == V4L2_SUBDEV_FORMAT_ACTIVE) {
-		state->fmt_changed = true;
-		state->vb_fifo = vb_fifo;
-		if (new_freq != cur_freq)
-			v4l2_ctrl_s_ctrl(state->link_freq, new_freq);
-	}
-
+	v4l2_info(sd, "Called %s, completed successfully\n", __FUNCTION__);
 	return 0;
 }
 
@@ -1693,69 +1473,7 @@ static int tc358748_enum_frame_size(struct v4l2_subdev *sd,
 	v4l2_info(sd, "!!!!!!!!! %s() complete successfully, width: %d, height: %d\n", __func__, fse->min_width, fse->min_height);
 	return 0;
 }
-static int
-tc358748_link_validate(struct v4l2_subdev *sd, struct media_link *link,
-		       struct v4l2_subdev_format *source_fmt,
-		       struct v4l2_subdev_format *sink_fmt)
-{
-	struct tc358748_state *state = to_state(sd);
-	struct device *dev = &state->i2c_client->dev;
-	const struct tc358748_mbus_fmt *tc358748_mbusformat;
-	struct v4l2_subdev *sensor_sd;
-	struct v4l2_ctrl *ctrl;
-	unsigned int pclk, pclk_old = state->pclk;
-	unsigned int hblank, hblank_old = state->hblank;
-	int new_freq;
-	u16 vb_fifo;
 
-	/*
-	 * Only validate if the timings are changed, after the link was already
-	 * initialized. This can be happen if the parallel sensor frame interval
-	 * is changed. Format checks are perfomed by the common code.
-	 */
-
-	tc358748_mbusformat = tc358748_get_format(sink_fmt->format.code);
-	if (!tc358748_mbusformat)
-		return -EINVAL; /* Format was changed too and is invalid */
-
-	sensor_sd = media_entity_to_v4l2_subdev(link->source->entity);
-	ctrl = v4l2_ctrl_find(sensor_sd->ctrl_handler, V4L2_CID_PIXEL_RATE);
-	pclk = v4l2_ctrl_g_ctrl_int64(ctrl);
-	if (pclk != state->pclk) {
-		dev_dbg(dev, "%s pixel rate is changed\n", sensor_sd->name);
-		state->pclk = pclk;
-	}
-
-	ctrl = v4l2_ctrl_find(sensor_sd->ctrl_handler, V4L2_CID_HBLANK);
-	hblank = v4l2_ctrl_g_ctrl(ctrl);
-	if (hblank != state->hblank) {
-		dev_dbg(dev,
-			"%s hblank interval is changed\n", sensor_sd->name);
-		state->hblank = hblank;
-	}
-
-	new_freq = tc358748_adjust_timings(state, tc358748_mbusformat,
-					   &source_fmt->format.width, &vb_fifo);
-
-	if (new_freq != v4l2_ctrl_g_ctrl(state->link_freq)) {
-		/*
-		 * This can lead into undefined behaviour, so we don't support
-		 * dynamic changes due to a to late re-configuration.
-		 */
-		dev_err(dev,
-			"%s format can't be applied re-run the whole s_fmt\n",
-			sensor_sd->name);
-		state->pclk = pclk_old;
-		state->hblank = hblank_old;
-
-		return -EINVAL;
-	}
-
-	state->fmt_changed = true;
-	state->vb_fifo = vb_fifo;
-
-	return 0;
-}
 static int tc358748_enum_frame_interval(struct v4l2_subdev *sd,
 				                        struct v4l2_subdev_pad_config  *cfg,
 				                        struct v4l2_subdev_frame_interval_enum *fie)
@@ -1834,10 +1552,15 @@ static const struct v4l2_subdev_video_ops tc358748_video_ops = {
 };
 
 static const struct v4l2_subdev_pad_ops tc358748_pad_ops = {
-	.enum_mbus_code = tc358748_enum_mbus_code,
 	.set_fmt = tc358748_set_fmt,
 	.get_fmt = tc358748_get_fmt,
-	.link_validate = tc358748_link_validate,
+	.get_edid = tc358748_g_edid,
+	.set_edid = tc358748_s_edid,
+	.dv_timings_cap = tc358748_dv_timings_cap,
+	.enum_dv_timings = tc358748_enum_dv_timings,
+	.enum_mbus_code = tc358748_enum_mbus_code,
+	.enum_frame_size = tc358748_enum_frame_size,
+	.enum_frame_interval = tc358748_enum_frame_interval,
 };
 
 static const struct v4l2_subdev_ops tc358748_ops = {
@@ -2155,7 +1878,7 @@ static int tc358748_probe(struct i2c_client *client,
 	}
 	*/
 	/* control handlers */
-	v4l2_ctrl_handler_init(&state->hdl, 1);
+	v4l2_ctrl_handler_init(&state->hdl, 3);
 	v4l2_info(sd, "ctrl handler initied\n");
 
 	/* private controls */
@@ -2336,7 +2059,11 @@ static int tc358748_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct tc358748_state *state = to_state(sd);
-	
+	printk("TC358748: I'M REMOVEing!!!!!!");
+	printk("TC358748: I'M REMOVEing!!!!!!");
+	printk("TC358748: I'M REMOVEing!!!!!!");
+	printk("TC358748: I'M REMOVEing!!!!!!");
+	printk("TC358748: I'M REMOVEing!!!!!!");
 	printk("TC358748: I'M REMOVEing!!!!!!");
 	cancel_delayed_work(&state->delayed_work_enable_hotplug);
 	destroy_workqueue(state->work_queues);
@@ -2346,7 +2073,11 @@ static int tc358748_remove(struct i2c_client *client)
 	media_entity_cleanup(&sd->entity);
 	v4l2_ctrl_handler_free(&state->hdl);
 	printk("TC358748: I'M REMOVEed!!!!!!");
-
+	printk("TC358748: I'M REMOVEed!!!!!!");
+	printk("TC358748: I'M REMOVEed!!!!!!");
+	printk("TC358748: I'M REMOVEed!!!!!!");
+	printk("TC358748: I'M REMOVEed!!!!!!");
+	printk("TC358748: I'M REMOVEed!!!!!!");
 
 	return 0;
 }
