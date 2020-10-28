@@ -545,7 +545,7 @@ static inline void enable_stream(struct v4l2_subdev *sd, bool enable)
 	//v4l2_info(sd, "%s: %sable\n",	__func__, enable ? "en" : "dis");
 
 	if (!enable) {
-		i2c_wr16_and_or(sd, PP_MISC, ~PP_MISC_FRMSTOP_MASK,
+		i2c_wr16_and_or(sd, PP_MISC, PP_MISC_FRMSTOP_MASK_NOT,
 				PP_MISC_FRMSTOP_MASK);
 		i2c_wr16_and_or(sd, CONFCTL, ~CONFCTL_PPEN_MASK, 0);
 		i2c_wr16_and_or(sd, PP_MISC, ~PP_MISC_RSTPTR_MASK,
@@ -1865,7 +1865,7 @@ static int tc358748_probe(struct i2c_client *client,
 	}
 	*/
 	/* control handlers */
-	v4l2_ctrl_handler_init(&state->hdl, 3);
+	v4l2_ctrl_handler_init(&state->hdl, 1);
 	v4l2_info(sd, "ctrl handler initied\n");
 
 	/* private controls */
@@ -2046,11 +2046,7 @@ static int tc358748_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct tc358748_state *state = to_state(sd);
-	printk("TC358748: I'M REMOVEing!!!!!!");
-	printk("TC358748: I'M REMOVEing!!!!!!");
-	printk("TC358748: I'M REMOVEing!!!!!!");
-	printk("TC358748: I'M REMOVEing!!!!!!");
-	printk("TC358748: I'M REMOVEing!!!!!!");
+	
 	printk("TC358748: I'M REMOVEing!!!!!!");
 	cancel_delayed_work(&state->delayed_work_enable_hotplug);
 	destroy_workqueue(state->work_queues);
@@ -2060,11 +2056,7 @@ static int tc358748_remove(struct i2c_client *client)
 	media_entity_cleanup(&sd->entity);
 	v4l2_ctrl_handler_free(&state->hdl);
 	printk("TC358748: I'M REMOVEed!!!!!!");
-	printk("TC358748: I'M REMOVEed!!!!!!");
-	printk("TC358748: I'M REMOVEed!!!!!!");
-	printk("TC358748: I'M REMOVEed!!!!!!");
-	printk("TC358748: I'M REMOVEed!!!!!!");
-	printk("TC358748: I'M REMOVEed!!!!!!");
+
 
 	return 0;
 }
