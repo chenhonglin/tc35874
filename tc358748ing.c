@@ -753,10 +753,10 @@ static void tc358748_set_pll(struct v4l2_subdev *sd)
 	if ((pllctl0 != pllctl0_new) ||
 	    ((pllctl1 & PLLCTL1_PLL_EN_MASK) == 0)) {
 		u16 pllctl1_mask = (u16) ~(PLLCTL1_PLL_FRS_MASK |
-					   PLLCTL1_RESETB_MASK  |
+					   MASK_RESETB  |
 					   PLLCTL1_PLL_EN_MASK);
 		u16 pllctl1_val = PLLCTL1_PLL_FRS_SET(pll_frs) |
-				  PLLCTL1_RESETB_MASK | PLLCTL1_PLL_EN_MASK;
+				  MASK_RESETB | PLLCTL1_PLL_EN_MASK;
 
 		dev_dbg(dev, "updating PLL clock\n");
 		i2c_wr16(sd, PLLCTL0, pllctl0_new);
@@ -1038,7 +1038,7 @@ static int tc358748_g_mbus_config(struct v4l2_subdev *sd,
 static int tc358748_s_power(struct v4l2_subdev *sd, int on)
 {
 	struct tc358748_state *state = to_state(sd);
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	
 	/*
 	 * REF_01:
 	 * Softreset don't reset configuration registers content but is needed
@@ -1070,7 +1070,7 @@ static int tc358748_s_power(struct v4l2_subdev *sd, int on)
 static int tc358748_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	tc358748_enable_stream(sd, enable);
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	
 	return 0;
 }
 
@@ -1110,7 +1110,7 @@ static int tc358748_get_fmt(struct v4l2_subdev *sd,
 		struct v4l2_subdev_format *format)
 {
 	struct tc358748_state *state = to_state(sd);
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	
 	if (format->pad != 0 && format->pad != 1)
 		return -EINVAL;
 
@@ -1126,7 +1126,7 @@ static int tc358748_set_fmt(struct v4l2_subdev *sd,
 			    struct v4l2_subdev_pad_config *cfg,
 			    struct v4l2_subdev_format *format)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	
 	struct tc358748_state *state = to_state(sd);
 	struct device *dev = &state->i2c_client->dev;
 	struct media_pad *pad = &state->pads[format->pad];
@@ -1713,7 +1713,8 @@ static int tc358748_probe(struct i2c_client *client,
 	}
 
 	/* control handlers */
-	v4l2_ctrl_handler_init(&state->hdl, 1);
+	v4l2_ctrl_handler_init(&state->hdl, 3);
+	v4l2_info(sd, "ctrl handler initied\n");
 
 	v4l2_ctrl_new_std_menu_items(&state->hdl,
 			&tc358764_ctrl_ops, V4L2_CID_TEST_PATTERN,
@@ -1729,19 +1730,24 @@ static int tc358748_probe(struct i2c_client *client,
 
 
 	sd->ctrl_handler = &state->hdl;
-	if (state->hdl.error) {
+	/*if (state->hdl.error) {
+	v4l2_info(sd,"ctrl_handler fail\n");
 		err = state->hdl.error;
 		goto err_hdl;
-	}
-
+	}*/
+	
 	state->pads[1].flags = MEDIA_PAD_FL_SOURCE;
 	state->pads[0].flags = MEDIA_PAD_FL_SINK;
 	//sd->entity.function = MEDIA_ENT_F_VID_IF_BRIDGE;
 	sd->entity.ops = &tc358748_entity_ops;
-	err = tegra_media_entity_init(&sd->entity, 2, state->pads);
+	err = tegra_media_entity_init(&sd->entity, 2, state->pads, true, true);
+	
 	if (err < 0)
+	{
+		v4l2_info(sd,"tegra media entity init fail\n");
 		goto err_hdl;
-
+	}
+	
 	mutex_init(&state->confctl_mutex);
 
 	state->fmt = tc358748_def_fmt;
@@ -1756,8 +1762,10 @@ static int tc358748_probe(struct i2c_client *client,
 	tc358748_enable_stream(sd, 0);
 
 	err = v4l2_async_register_subdev(sd);
-	if (err < 0)
+	if (err < 0){
+	v4l2_info(sd,"v4l2_async_register_subdev fail\n");
 		goto err_hdl;
+}
 
 	v4l2_info(sd, "%s found @ 0x%x (%s)\n", client->name,
 		  client->addr << 1, client->adapter->name);
@@ -1765,6 +1773,7 @@ static int tc358748_probe(struct i2c_client *client,
 	return 0;
 
 err_hdl:
+	
 	media_entity_cleanup(&sd->entity);
 	v4l2_ctrl_handler_free(&state->hdl);
 	return err;
