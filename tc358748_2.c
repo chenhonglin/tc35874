@@ -990,12 +990,10 @@ static void tc358748_print_register_map(struct v4l2_subdev *sd)
 static int tc358748_get_reg_size(u16 address)
 {
 	/* REF_01 p. 66-72 */
-	if (address <=0x00ff)
+	if (address <= 0x00ff)
 		return 2;
-	else if ((address >=0x0100) && (address <=0x06FF))
+	else if ((address >= 0x0100) && (address <= 0x05FF))
 		return 4;
-	else if ((address >=0x0700) && (address <=0x84ff))
-		return 2;
 	else
 		return 1;
 }
@@ -1010,6 +1008,7 @@ static int tc358748_g_register(struct v4l2_subdev *sd,
 
 	reg->size = tc358748_get_reg_size(reg->reg);
 	// no return i2c__rd(sd, reg->reg, (u8 *)&reg->val, reg->size);
+	reg->val = i2c_rdreg(sd, reg->reg, reg->size);
 	return 0;
 }
 
@@ -1027,12 +1026,8 @@ static int tc358748_s_register(struct v4l2_subdev *sd,
 	 * DO NOT REMOVE THIS unless all other issues with HDCP have been
 	 * resolved.
 	 */
-	if (reg->reg == HDCP_MODE ||
-	    reg->reg == HDCP_REG1 ||
-	    reg->reg == HDCP_REG2 ||
-	    reg->reg == HDCP_REG3 ||
-	    reg->reg == BCAPS)
-		return 0;
+	i2c_wrreg(sd, (u16)reg->reg, reg->val,
+			tc358748_get_reg_size(reg->reg));
 
 	//746src_ i2c__wr(sd, (u16)reg->reg, (u8 *)&reg->val, tc358748_get_reg_size(reg->reg));
 
