@@ -671,7 +671,7 @@ static void tc358748_set_pll(struct v4l2_subdev *sd)
 	 * triggers another format change event. */
 	if ((pllctl0 != pllctl0_new) || ((pllctl1 & MASK_PLL_EN) == 0)) {
 		u16 pll_frs;
-	/*
+	
 		if (hsck > 500000000)
 			pll_frs =0x0;
 		else if (hsck > 250000000)
@@ -680,7 +680,7 @@ static void tc358748_set_pll(struct v4l2_subdev *sd)
 			pll_frs =0x2;
 		else
 			pll_frs =0x3;
-	*/
+	
 		//WARNING: [pll_frs=0x2] is only for DEBUG. Normal is [pll_frs=0x0]
 		hsck=hsck;
 		pll_frs=0x2;
