@@ -577,6 +577,15 @@ static inline void enable_stream(struct v4l2_subdev *sd, bool enable)
 		 * No data is output to CSI Tx block. */
 		//746src_ i2c__wr8(sd, VI_MUTE, MASK_AUTO_MUTE | MASK_VI_MUTE);
 	}
+	//csi ERR Register.
+	
+	
+	printk("TC358748 ERROR Register: %u", i2c_rd16(sd,0x044C) );
+	printk("TC358748 ERROR Register: %u", i2c_rd16(sd,0x0450) );
+	printk("TC358748 ERROR Register: %u", i2c_rd16(sd,0x0454) );
+	
+	printk("TC358748 DEBUG Register: %u", i2c_rd16(sd,0x0000) );
+	printk("TC358748 DEBUG Register: %u", i2c_rd16(sd,0x0002) );
 
 	mutex_lock(&state->confctl_mutex);
 	//746src_ i2c__wr16_and_or(sd, CONFCTL, ~(MASK_VBUFEN | MASK_ABUFEN), enable ? (MASK_VBUFEN | MASK_ABUFEN) :0x0);
@@ -652,12 +661,12 @@ static void tc358748_set_pll(struct v4l2_subdev *sd)
 	printk("TC358748DEV: tc358748_set_pll : pllctl0 = %u ", pllctl0);
 	printk("TC358748DEV: tc358748_set_pll : pllctl1 = %u ", pllctl1);
 	
-	printk("TC358748DEV: tc358748_set_pll : pdata->refclk_hz = %u "	, pdata->refclk_hz); //RDF=27MHz
+	printk("TC358748DEV: tc358748_set_pll : pdata->refclk_hz = %u "	, pdata->refclk_hz); //REF=27MHz
 	printk("TC358748DEV: tc358748_set_pll : pdata->pll_prd = %u "	, pdata->pll_prd); //PRD=4
 	printk("TC358748DEV: tc358748_set_pll : pdata->pll_fbd = %u "	, pdata->pll_fbd); //FBD=88
 	
 	v4l2_info(sd, "%s:\n", __func__);
-
+	
 	/* Only rewrite when needed (new value or disabled), since rewriting
 	 * triggers another format change event. */
 	if ((pllctl0 != pllctl0_new) || ((pllctl1 & MASK_PLL_EN) == 0)) {
@@ -676,7 +685,7 @@ static void tc358748_set_pll(struct v4l2_subdev *sd)
 		hsck=hsck;
 		pll_frs=0x2;
 		//if frs=0x2, PLL freq is 148.5MHz.
-		//if frs=0x0, PLL freq is 594.0MHz
+		//if frs=0x0, PLL freq is 594.0MHz.
 		
 		v4l2_info(sd, "%s: updating PLL clock\n", __func__);
 		//tc358748_sleep_mode(sd, true);
@@ -1103,10 +1112,6 @@ static int tc358748_s_dv_timings(struct v4l2_subdev *sd,
 	}
 
 	state->timings = *timings;
-
-	enable_stream(sd, false);
-	tc358748_set_pll(sd);
-	tc358748_set_csi(sd);
 	
 	return 0;
 }
@@ -1321,10 +1326,7 @@ static int tc358748_set_fmt(struct v4l2_subdev *sd,
 
 	state->mbus_fmt_code = format->format.code;
 
-	enable_stream(sd, false);
-	tc358748_set_pll(sd);
-	tc358748_set_csi(sd);
-	tc358748_set_csi_color_space(sd);
+
 	v4l2_info(sd, "Called %s, completed successfully\n", __FUNCTION__);
 	return 0;
 }
@@ -1975,17 +1977,41 @@ static int tc358748_probe(struct i2c_client *client,
 	i2c_wr16(sd, SYSCTL, MASK_SRESET);
 	udelay(10);
 	i2c_wr16(sd, SYSCTL, 0);
-
+	
+	tc358748_set_pll(sd);
 	
 	//set buffers
+		//#define FIFOCTL                               0x0006
 	i2c_wr16(sd, FIFOCTL, pdata->fifo_level);
-	//#define FIFOCTL                               0x0006
-	
+
 	//set csi is in another place.
+	//enable_stream(sd, false);
+
+	tc358748_set_csi(sd);
 	tc358748_set_csi_color_space(sd);
 	
+	//GPIO DEBUG.
+	i2c_wr16(sd,0x000E,0xFFFF);
+	printk("TC358748 GPIO Register1: %u", i2c_rd16(sd,0x000E) );
+	
+	
+	i2c_wr16(sd,0x000E,0x000F);
+	printk("TC358748 GPIO Register3: %u", i2c_rd16(sd,0x000E) );
+	
+	i2c_wr16(sd,0x000E,0xF000);
+	printk("TC358748 GPIO Register2: %u", i2c_rd16(sd,0x000E) );
+	
+	i2c_wr16(sd,0x0010,0x0000);
+	i2c_wr16(sd,0x0014,0xFFFF);
+	
+	
 	//sleep chip
-	i2c_wr16_and_or(sd, SYSCTL, ~MASK_SLEEP, MASK_SLEEP);
+	//i2c_wr16_and_or(sd, SYSCTL, ~MASK_SLEEP, MASK_SLEEP);
+	
+	//ClkControl
+	
+		//#define Clkctl 0x0020
+		//#define Clkctl_ref 0b0000000000 10 
 	
 	//disable the stream.
 	i2c_wr16_and_or(sd, PP_MISC, PP_MISC_FRMSTOP_MASK_NOT, PP_MISC_FRMSTOP_MASK);
@@ -2033,7 +2059,12 @@ static int tc358748_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct tc358748_state *state = to_state(sd);
-
+	printk("TC358748: I'M REMOVEing!!!!!!");
+	printk("TC358748: I'M REMOVEing!!!!!!");
+	printk("TC358748: I'M REMOVEing!!!!!!");
+	printk("TC358748: I'M REMOVEing!!!!!!");
+	printk("TC358748: I'M REMOVEing!!!!!!");
+	printk("TC358748: I'M REMOVEing!!!!!!");
 	cancel_delayed_work(&state->delayed_work_enable_hotplug);
 	destroy_workqueue(state->work_queues);
 	v4l2_async_unregister_subdev(sd);
@@ -2041,6 +2072,12 @@ static int tc358748_remove(struct i2c_client *client)
 	mutex_destroy(&state->confctl_mutex);
 	media_entity_cleanup(&sd->entity);
 	v4l2_ctrl_handler_free(&state->hdl);
+	printk("TC358748: I'M REMOVEed!!!!!!");
+	printk("TC358748: I'M REMOVEed!!!!!!");
+	printk("TC358748: I'M REMOVEed!!!!!!");
+	printk("TC358748: I'M REMOVEed!!!!!!");
+	printk("TC358748: I'M REMOVEed!!!!!!");
+	printk("TC358748: I'M REMOVEed!!!!!!");
 
 	return 0;
 }
