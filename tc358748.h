@@ -85,4 +85,3 @@ struct tc358748_platform_data {
 	u32 hstxvregcnt;	
 
 	};
-
